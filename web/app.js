@@ -466,11 +466,30 @@ async function loadServerListings() {
     state.listings = payload.listings || [];
     state.unmatched = payload.unmatched_listings || [];
     state.stats = payload;
+    // 서버가 첫 수집 중이면 잠시 후 자동으로 다시 불러온다
+    if (payload.collecting) {
+      scheduleCollectingReload();
+    }
     return true;
   } catch {
     state.hasServer = false;
     return false;
   }
+}
+
+let collectingReloadTimer = null;
+function scheduleCollectingReload() {
+  clearTimeout(collectingReloadTimer);
+  elements.scanStatus.textContent = "매물 수집 중... (잠시 후 자동 표시)";
+  elements.scanStatus.className = "status-pill need";
+  collectingReloadTimer = setTimeout(async () => {
+    await loadServerListings();
+    if (!state.stats?.collecting) {
+      elements.scanStatus.textContent = "서버 연결됨";
+      elements.scanStatus.className = "status-pill ok";
+    }
+    renderDashboard();
+  }, 4000);
 }
 
 async function loadFavorites() {
@@ -598,12 +617,13 @@ async function runScan() {
   if (state.hasServer) {
     try {
       const result = await apiJson("/api/scan", { method: "POST" });
-      await loadServerListings();
-      elements.scanStatus.textContent = `최근 실행 ${new Date().toLocaleTimeString("ko-KR")} · 신규 ${result.notified_count}건`;
-      elements.scanStatus.className = "status-pill ok";
-      if (result.notified_count > 0) {
-        showToast(`신규 매물 ${result.notified_count}건 발견! Gmail 알림을 확인하세요.`);
+      if (result.scanning) {
+        showToast("매물 수집을 시작했습니다 — 잠시 후 자동으로 갱신됩니다");
+        scheduleCollectingReload();
+      } else {
+        showToast("이미 수집이 진행 중입니다");
       }
+      await loadServerListings();
       renderDashboard();
       return;
     } catch {

@@ -4,6 +4,7 @@ import base64
 import hmac
 import json
 import os
+import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -45,26 +46,83 @@ MAX_BODY_BYTES = 256 * 1024
 # 로컬 전용 사용이면 비워 두면 된다 — 클라우드 공개 배포 시 필수.
 DASHBOARD_PASSWORD_ENV = "DASHBOARD_PASSWORD"
 
-# 수집 결과 캐시 — 보드를 열 때마다 6개 소스를 재수집하지 않도록 interval_seconds 동안 재사용.
-# "신규 매물 스캔" 버튼(/api/scan)은 캐시를 무효화하고 즉시 재수집한다.
-_snapshot_cache: dict[str, tuple[float, ListingSnapshot]] = {}
+# 수집 결과 캐시 — HTTP 요청은 절대 수집을 기다리지 않고 캐시만 읽는다.
+# 수집은 백그라운드 스레드가 처리한다 (저사양 클라우드에서 요청 타임아웃/OOM 방지).
+_snapshot_cache: dict[str, ListingSnapshot] = {}
+_snapshot_fetched_at: dict[str, float] = {}
+_collect_lock = threading.Lock()
+_collecting: set[str] = set()
+
+
+def _empty_snapshot() -> ListingSnapshot:
+    return ListingSnapshot(fetched=[], matched=[])
+
+
+def _run_collection(config_path: Path) -> None:
+    """백그라운드에서 수집해 캐시를 채운다. 동시 중복 수집은 막는다."""
+    key = str(config_path)
+    with _collect_lock:
+        if key in _collecting:
+            return
+        _collecting.add(key)
+    try:
+        snapshot = collect_listings(load_config(config_path))
+        _snapshot_cache[key] = snapshot
+        _snapshot_fetched_at[key] = time.monotonic()
+    except Exception as error:  # noqa: BLE001 — 수집 실패는 다음 주기에 재시도
+        print(f"[collect] 백그라운드 수집 실패: {error}")
+    finally:
+        _collecting.discard(key)
+
+
+def _ensure_collection(config_path: Path, force: bool = False) -> bool:
+    """캐시가 비었거나 오래됐으면(또는 force) 백그라운드 수집을 띄운다. 진행 중이면 True."""
+    key = str(config_path)
+    ttl = max(60, load_config(config_path).interval_seconds)
+    fetched_at = _snapshot_fetched_at.get(key, 0.0)
+    stale = (time.monotonic() - fetched_at) >= ttl
+    if force or key not in _snapshot_cache or stale:
+        threading.Thread(target=_run_collection, args=(config_path,), daemon=True).start()
+    return key in _collecting
 
 
 def _cached_snapshot(config_path: Path) -> ListingSnapshot:
-    config = load_config(config_path)
-    key = str(config_path)
-    ttl = max(60, config.interval_seconds)
-    cached = _snapshot_cache.get(key)
-    now = time.monotonic()
-    if cached and now - cached[0] < ttl:
-        return cached[1]
-    snapshot = collect_listings(config)
-    _snapshot_cache[key] = (now, snapshot)
-    return snapshot
+    """캐시 스냅샷을 즉시 반환한다(없으면 빈 스냅샷). 갱신은 백그라운드에 맡긴다."""
+    _ensure_collection(config_path)
+    return _snapshot_cache.get(str(config_path)) or _empty_snapshot()
 
 
 def _invalidate_snapshot(config_path: Path) -> None:
-    _snapshot_cache.pop(str(config_path), None)
+    _snapshot_fetched_at.pop(str(config_path), None)
+
+
+def _run_scan(config_path: Path) -> None:
+    """백그라운드 전체 스캔 — 수집 + 신규 매물 알림 + 캐시 갱신."""
+    key = str(config_path)
+    with _collect_lock:
+        if key in _collecting:
+            return
+        _collecting.add(key)
+    try:
+        config = load_config(config_path)
+        result = run_once(config)
+        # run_once가 내부에서 다시 수집하므로 캐시도 최신 스냅샷으로 맞춘다
+        _snapshot_cache[key] = collect_listings(config)
+        _snapshot_fetched_at[key] = time.monotonic()
+        print(f"[scan] 완료 — 수집 {result.fetched_count} / 신규 {len(result.notified)}")
+    except Exception as error:  # noqa: BLE001
+        print(f"[scan] 백그라운드 스캔 실패: {error}")
+    finally:
+        _collecting.discard(key)
+
+
+def _start_scan(config_path: Path) -> bool:
+    """스캔을 백그라운드로 시작한다. 이미 진행 중이면 False."""
+    key = str(config_path)
+    if key in _collecting:
+        return False
+    threading.Thread(target=_run_scan, args=(config_path,), daemon=True).start()
+    return True
 
 
 def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestHandler]:
@@ -180,14 +238,16 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 self._send_unauthorized()
                 return
             if self.path == "/api/scan":
-                _invalidate_snapshot(config_path)
-                result = run_once(load_config(config_path))
+                # 수집·알림은 백그라운드에서 — 저사양 클라우드에서 요청이 막히지 않도록.
+                started = _start_scan(config_path)
+                snapshot = _snapshot_cache.get(str(config_path)) or _empty_snapshot()
                 self._send_json(
                     {
-                        "fetched_count": result.fetched_count,
-                        "matched_count": result.matched_count,
-                        "notified_count": len(result.notified),
-                        "notified": [_listing_to_dict(listing) for listing in result.notified],
+                        "scanning": started,
+                        "fetched_count": snapshot.fetched_count,
+                        "matched_count": snapshot.matched_count,
+                        "notified_count": 0,
+                        "notified": [],
                     }
                 )
                 return
@@ -555,6 +615,8 @@ def _listings_payload(config_path: Path) -> dict[str, Any]:
         "favorite_count": len(favorites),
         "listings": listings,
         "unmatched_listings": unmatched,
+        # 첫 수집 진행 중이면 빈 결과 — UI가 잠시 후 다시 불러오도록 안내
+        "collecting": str(config_path) in _collecting and snapshot.fetched_count == 0,
     }
 
 

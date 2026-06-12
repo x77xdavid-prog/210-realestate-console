@@ -19,7 +19,7 @@ class WebServerTests(unittest.TestCase):
             config_path = _write_fixture_config(root)
             server = _start_server(config_path, root)
             try:
-                response = _request_json(server, "GET", "/api/listings")
+                response = _listings_when_ready(server)
             finally:
                 server.shutdown()
                 server.server_close()
@@ -33,20 +33,21 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(response["unmatched_listings"][0]["external_id"], "miss")
         self.assertFalse(response["unmatched_listings"][0]["is_match"])
 
-    def test_api_scan_reports_only_new_notifications(self):
+    def test_api_scan_triggers_background_collection(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             config_path = _write_fixture_config(root)
             server = _start_server(config_path, root)
             try:
                 first = _request_json(server, "POST", "/api/scan")
-                second = _request_json(server, "POST", "/api/scan")
+                # 스캔이 끝나면 매물이 캐시에 채워진다
+                listings = _listings_when_ready(server)
             finally:
                 server.shutdown()
                 server.server_close()
 
-        self.assertEqual(first["notified_count"], 1)
-        self.assertEqual(second["notified_count"], 0)
+        self.assertTrue(first["scanning"])
+        self.assertEqual(listings["matched_count"], 1)
 
     def test_api_listings_includes_naver_and_new_flags(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -57,7 +58,7 @@ class WebServerTests(unittest.TestCase):
                          if k not in ("DATA_GO_KR_API_KEY", "VWORLD_API_KEY")}
             try:
                 with mock.patch.dict("os.environ", clean_env, clear=True):
-                    response = _request_json(server, "GET", "/api/listings")
+                    response = _listings_when_ready(server)
             finally:
                 server.shutdown()
                 server.server_close()
@@ -316,7 +317,7 @@ class ChecklistApiTests(unittest.TestCase):
             server = _start_server(config_path, root)
             try:
                 _request_json(server, "POST", "/api/scan")
-                response = _request_json(server, "GET", "/api/listings")
+                response = _listings_when_ready(server)
             finally:
                 server.shutdown()
                 server.server_close()
@@ -423,6 +424,20 @@ class DocumentApiTests(unittest.TestCase):
             finally:
                 server.shutdown()
                 server.server_close()
+
+
+def _listings_when_ready(server: ThreadingHTTPServer, attempts: int = 50) -> dict:
+    """수집은 백그라운드라 캐시가 찰 때까지 /api/listings를 폴링한다 (테스트 픽스처는 즉시 완료)."""
+    import time as _time
+
+    response = _request_json(server, "GET", "/api/listings")
+    for _ in range(attempts):
+        if response.get("fetched_count", 0) > 0 or not response.get("collecting"):
+            if response.get("fetched_count", 0) > 0:
+                return response
+        _time.sleep(0.05)
+        response = _request_json(server, "GET", "/api/listings")
+    return response
 
 
 def _request_raw(
