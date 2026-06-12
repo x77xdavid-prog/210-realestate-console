@@ -133,6 +133,10 @@ const elements = {
   checklistProgress: document.querySelector("#checklistProgress"),
   checklistProfile: document.querySelector("#checklistProfile"),
   checklistSections: document.querySelector("#checklistSections"),
+  checklistReport: document.querySelector("#checklistReport"),
+  verifyStage: document.querySelector("#verifyStage"),
+  verifySteps: document.querySelector("#verifySteps"),
+  verifyStamps: document.querySelector("#verifyStamps"),
 };
 
 const state = {
@@ -149,6 +153,8 @@ const state = {
     reviews: new Map(),
     current: null,
     currentIdentity: null,
+    view: "items",
+    reportEntrance: false,
   },
 };
 
@@ -1038,13 +1044,48 @@ function renderPriority() {
     .slice(0, 3)
     .map(
       (listing, index) => `
-        <article class="priority-item" role="listitem">
+        <article class="priority-item" role="listitem" tabindex="0"
+          data-priority-identity="${escapeHtml(identityOf(listing))}" title="클릭하면 매물 카드로 이동">
           <strong>${index + 1}. ${escapeHtml(listing.title)}</strong>
           <span>${money(listing.deposit)} / ${money(listing.monthly_rent)} · ${formatArea(listing.area_m2)}</span>
         </article>
       `,
     )
     .join("");
+  elements.priorityList.querySelectorAll("[data-priority-identity]").forEach((item) => {
+    const goToCard = () => focusListingCard(item.dataset.priorityIdentity);
+    item.addEventListener("click", goToCard);
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        goToCard();
+      }
+    });
+  });
+}
+
+function focusListingCard(identity) {
+  const listing = [...state.listings, ...state.unmatched].find(
+    (item) => identityOf(item) === identity,
+  );
+  if (!listing) return;
+  const findCard = () =>
+    elements.boardGrid.querySelector(`[data-card-identity="${CSS.escape(identity)}"]`);
+  let card = findCard();
+  if (!card) {
+    // 현재 보드 필터에 없는 매물이면 전체 보기로 전환 후 찾는다
+    setBoardFilter("all");
+    card = findCard();
+  }
+  if (!card) {
+    setBoardFilter("fetched");
+    card = findCard();
+  }
+  if (!card) return;
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  card.classList.add("card-spotlight");
+  setTimeout(() => card.classList.remove("card-spotlight"), 2200);
+  selectListingForMap(listing);
 }
 
 function renderAssetCriteria() {
@@ -1156,8 +1197,280 @@ async function openChecklistModal(identity) {
     }
   }
   elements.checklistProfile.value = state.checklist.current?.profile ?? defaultProfileFor(listing);
+  // 검토 이력이 있으면 리포트부터, 처음이면 항목 체크부터 보여준다
+  setChecklistView(state.checklist.current ? "report" : "items");
   renderChecklistModal(false);
   elements.checklistModal.showModal();
+}
+
+function setChecklistView(view) {
+  state.checklist.view = view;
+  document.querySelector("#viewReportTab").classList.toggle("active", view === "report");
+  document.querySelector("#viewItemsTab").classList.toggle("active", view === "items");
+  elements.checklistReport.hidden = view !== "report";
+  elements.checklistSections.hidden = view !== "items";
+}
+
+/* ===== 자동 검증 연출 ===== */
+
+const VERIFY_STEPS = [
+  "주소 분석 · 필지 식별",
+  "건축물대장 조회",
+  "토지이용계획 · 공시지가 조회",
+  "주변 실거래가 분석",
+  "체크리스트 판정 작성",
+];
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function showVerifyStage() {
+  elements.verifySteps.innerHTML = VERIFY_STEPS.map(
+    (label) => `<li><span class="step-icon" aria-hidden="true"></span>${label}</li>`,
+  ).join("");
+  elements.verifyStamps.innerHTML = "";
+  elements.verifyStage.hidden = false;
+  document.querySelector(".checklist-view-toggle").hidden = true;
+  elements.checklistReport.hidden = true;
+  elements.checklistSections.hidden = true;
+}
+
+function hideVerifyStage() {
+  elements.verifyStage.hidden = true;
+  document.querySelector(".checklist-view-toggle").hidden = false;
+}
+
+async function animateVerifySteps(fetchPromise) {
+  const steps = [...elements.verifySteps.children];
+  for (let i = 0; i < steps.length - 1; i += 1) {
+    steps[i].classList.add("active");
+    await sleep(550);
+    steps[i].classList.remove("active");
+    steps[i].classList.add("done");
+  }
+  const last = steps[steps.length - 1];
+  last.classList.add("active");
+  await fetchPromise; // 실제 공공데이터 조회가 끝날 때까지 마지막 단계 유지
+  last.classList.remove("active");
+  last.classList.add("done");
+}
+
+async function playStampSequence(review) {
+  const stamped = review.items.filter(
+    (item) => (item.kind === "auto" || item.kind === "info") && item.evidence,
+  );
+  for (const item of stamped) {
+    const [label, tone] = item.kind === "info" ? AUTO_STATUS_PILLS.info : itemStatusPill(item);
+    const row = document.createElement("div");
+    row.className = "stamp-row";
+    row.innerHTML = `<strong>${escapeHtml(item.label)}</strong><span class="status-pill ${tone}">${label}</span>`;
+    elements.verifyStamps.appendChild(row);
+    elements.verifyStamps.scrollTop = elements.verifyStamps.scrollHeight;
+    await sleep(300);
+  }
+  await sleep(450);
+}
+
+/* ===== 체크리스트 리포트 (대시보드형) ===== */
+
+function itemStatusPill(item) {
+  if (item.kind === "auto") {
+    return AUTO_STATUS_PILLS[item.status] ?? AUTO_STATUS_PILLS.unknown;
+  }
+  if (item.status === "pass") return ["적합", "ok"];
+  if (item.status === "fail") return ["부적합", "risk"];
+  if (item.status === "na") return ["해당없음", "neutral"];
+  return ["미체크", "neutral"];
+}
+
+function categorySummaries(items) {
+  const map = new Map();
+  items.forEach((item) => {
+    if (!map.has(item.category)) {
+      map.set(item.category, { earned: 0, possible: 0, judged: 0, total: 0 });
+    }
+    const cat = map.get(item.category);
+    cat.total += 1;
+    if (item.status === "pass") {
+      cat.earned += item.weight;
+      cat.possible += item.weight;
+      cat.judged += 1;
+    } else if (item.status === "warn") {
+      cat.earned += item.weight * 0.5;
+      cat.possible += item.weight;
+      cat.judged += 1;
+    } else if (item.status === "fail") {
+      cat.possible += item.weight;
+      cat.judged += 1;
+    } else if (item.status === "na") {
+      cat.judged += 1;
+    }
+  });
+  return map;
+}
+
+// 항목별 경고/부적합 시 권장 대응 (없으면 일반 문구 사용)
+const ACTION_HINTS = {
+  parking: "법정 주차대수 부족 가능 — 용도변경 시 추가 주차 확보 방안을 구청에 확인",
+  price_market: "시세 대비 고평가 — 가격 협상 여지와 최근 거래 사례 확인",
+  building_age: "노후 건물 — 구조 보강·리모델링 견적을 계약 전에 확보",
+  zoning: "용도지역 제한 우려 — 관할 구청에 의원 개설(용도) 가능 여부 질의",
+  elevator: "승강기 없음 — 설치 가능 여부·비용 확인 (거동불편 환자 접근 필수)",
+  road_access: "도로 접면 문제 — 맹지는 건축 불가, 진입로 확보 가능성 확인",
+};
+
+function buildActionItems(review) {
+  const actions = [];
+  const items = review.items;
+  const failedCritical = items.filter((i) => i.critical && i.status === "fail");
+  if (failedCritical.length > 0) {
+    actions.push({
+      tone: "risk",
+      text: `검토 중단 권장 — 치명 항목 부적합: ${failedCritical.map((i) => i.label).join(", ")}`,
+    });
+  }
+  items
+    .filter((i) => i.critical && (i.status === "unchecked" || i.status === "unknown"))
+    .forEach((i) => {
+      actions.push({ tone: "need", text: `치명 항목 우선 확인: ${i.label} — 결과에 따라 즉시 탈락 여부 결정` });
+    });
+  items
+    .filter((i) => i.status === "warn" || (i.status === "fail" && !i.critical))
+    .forEach((i) => {
+      actions.push({ tone: "need", text: ACTION_HINTS[i.item_id] ?? `${i.label} — 경고 사항 확인: ${i.evidence || i.description}` });
+    });
+  const unknownAuto = items.filter((i) => i.kind === "auto" && i.status === "unknown");
+  if (unknownAuto.length > 0) {
+    actions.push({
+      tone: "neutral",
+      text: `공공데이터로 확인 안 된 항목 ${unknownAuto.length}건 직접 확인: ${unknownAuto.map((i) => i.label).join(", ")} (세움터·토지이음)`,
+    });
+  }
+  const unchecked = items.filter((i) => i.kind !== "auto" && i.status === "unchecked");
+  if (unchecked.length > 0) {
+    actions.push({ tone: "neutral", text: `수동 체크 ${unchecked.length}건 진행 — 항목 체크 탭에서 적합/부적합 판정` });
+  }
+  if (failedCritical.length === 0 && (review.grade === "A" || review.grade === "B")) {
+    actions.push({
+      tone: "ok",
+      text: "다음 단계 진행: 현장 실사 → 장비업체(MRI) 실사 → 등기부 확인 → 전문가(세무·건축) 검토",
+    });
+  }
+  return actions;
+}
+
+function renderChecklistReport() {
+  const container = elements.checklistReport;
+  const current = state.checklist.current;
+  if (!current || current.profile !== elements.checklistProfile.value) {
+    container.innerHTML = `<div class="empty-state">"자동 검증 실행"을 누르면 공공데이터 판정과 함께 리포트가 자동 생성됩니다.</div>`;
+    return;
+  }
+  const items = current.items;
+  const autoCounts = { pass: 0, warn: 0, fail: 0, unknown: 0 };
+  items.filter((i) => i.kind === "auto").forEach((i) => {
+    autoCounts[i.status] = (autoCounts[i.status] || 0) + 1;
+  });
+  const actions = buildActionItems(current);
+  const cats = categorySummaries(items);
+  const evidenceItems = items.filter((i) => (i.kind === "auto" || i.kind === "info") && i.evidence);
+  const criticalItems = items.filter((i) => i.critical);
+  const pending = items.filter((i) => i.status === "unknown" || i.status === "unchecked");
+
+  const actionHtml = actions.length > 0
+    ? actions.map((action) => `
+        <li class="action-item tone-${action.tone}">
+          <span class="action-dot" aria-hidden="true"></span>${escapeHtml(action.text)}
+        </li>
+      `).join("")
+    : `<li class="action-item tone-ok"><span class="action-dot" aria-hidden="true"></span>모든 항목 판정 완료 — 추가 액션 없음</li>`;
+
+  const catHtml = [...cats.entries()].map(([name, cat]) => {
+    const pct = cat.possible > 0 ? Math.round((cat.earned / cat.possible) * 100) : null;
+    const tone = pct === null ? "" : pct >= 85 ? "bar-ok" : pct >= 50 ? "bar-need" : "bar-risk";
+    return `
+      <div class="cat-row">
+        <span class="cat-name">${escapeHtml(name)}</span>
+        <div class="cat-bar"><div class="cat-bar-fill ${tone}" style="width:${pct ?? 0}%"></div></div>
+        <span class="cat-meta">${pct === null ? "미판정" : `${pct}%`} · ${cat.judged}/${cat.total}</span>
+      </div>
+    `;
+  }).join("");
+
+  const evidenceHtml = evidenceItems.map((item) => {
+    const [label, tone] = item.kind === "info" ? AUTO_STATUS_PILLS.info : itemStatusPill(item);
+    return `
+      <div class="evidence-card">
+        <div class="evidence-head">
+          <strong>${escapeHtml(item.label)}</strong>
+          <span class="status-pill ${tone}">${label}</span>
+        </div>
+        <p>${escapeHtml(item.evidence)}</p>
+      </div>
+    `;
+  }).join("");
+
+  const criticalHtml = criticalItems.map((item) => {
+    const [label, tone] = itemStatusPill(item);
+    return `<li><span class="status-pill ${tone}">${label}</span> ${escapeHtml(item.label)}</li>`;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="report-kpis">
+      <div class="report-kpi">
+        <span class="kpi-label">종합 등급</span>
+        <span class="grade-badge ${gradeClass(current.grade)}">${escapeHtml(current.grade ?? "미검토")}</span>
+      </div>
+      <div class="report-kpi">
+        <span class="kpi-label">점수</span>
+        <strong>${current.score !== null ? `${current.score}점` : "—"}</strong>
+        <span class="kpi-sub">판정 항목 가중 평균</span>
+      </div>
+      <div class="report-kpi">
+        <span class="kpi-label">자동 판정</span>
+        <strong>적합 ${autoCounts.pass}</strong>
+        <span class="kpi-sub">경고 ${autoCounts.warn} · 부적합 ${autoCounts.fail} · 미확인 ${autoCounts.unknown}</span>
+      </div>
+      <div class="report-kpi">
+        <span class="kpi-label">수동 체크</span>
+        <strong>${current.progress.manual_done}/${current.progress.manual_total}</strong>
+        <span class="kpi-sub">남은 확인 ${pending.length}건</span>
+      </div>
+    </div>
+    <div class="report-section report-actions">
+      <h4>⚡ 추천 액션</h4>
+      <ul class="action-list">${actionHtml}</ul>
+    </div>
+    <div class="report-section">
+      <h4>카테고리별 진행</h4>
+      <div class="cat-list">${catHtml}</div>
+    </div>
+    <div class="report-section">
+      <h4>자동 검증 근거</h4>
+      ${evidenceHtml
+        ? `<div class="report-evidence-grid">${evidenceHtml}</div>`
+        : `<div class="empty-state">자동 검증을 실행하면 공공데이터 근거가 여기에 표시됩니다.</div>`}
+    </div>
+    <div class="report-section">
+      <h4>치명 항목 현황 <span class="kpi-sub">(하나라도 부적합이면 즉시 탈락)</span></h4>
+      <ul class="critical-list">${criticalHtml}</ul>
+    </div>
+  `;
+
+  if (state.checklist.reportEntrance) {
+    state.checklist.reportEntrance = false;
+    container.classList.add("report-enter");
+    // 카테고리 바를 0%에서 목표치까지 채우는 연출
+    container.querySelectorAll(".cat-bar-fill").forEach((fill) => {
+      const target = fill.style.width;
+      fill.style.width = "0%";
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          fill.style.width = target;
+        });
+      });
+    });
+    setTimeout(() => container.classList.remove("report-enter"), 1800);
+  }
 }
 
 function checklistItemsForRender() {
@@ -1187,6 +1500,8 @@ function renderChecklistModal(animateGrade) {
   elements.checklistProgress.textContent = profileMatches
     ? `자동 ${current.progress.auto_done}/${current.progress.auto_total} 확인 · 수동 ${current.progress.manual_done}/${current.progress.manual_total} 체크`
     : "자동 검증 실행 또는 수동 체크로 검토를 시작하세요";
+
+  renderChecklistReport();
 
   const items = checklistItemsForRender();
   if (items.length === 0) {
@@ -1328,29 +1643,48 @@ async function runChecklistEvaluate() {
   const button = document.querySelector("#checklistEvaluateButton");
   button.disabled = true;
   const originalLabel = button.textContent;
-  button.textContent = "공공데이터 조회 중...";
+  button.textContent = "검증 진행 중...";
+  const request = apiJson("/api/checklist/evaluate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      identity,
+      listing: entry.listing || {},
+      profile: elements.checklistProfile.value,
+    }),
+  });
+  const cinematic = !reducedMotion;
   try {
-    const payload = await apiJson("/api/checklist/evaluate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        identity,
-        listing: entry.listing || {},
-        profile: elements.checklistProfile.value,
-      }),
-    });
+    let payload;
+    if (cinematic) {
+      showVerifyStage();
+      await animateVerifySteps(request); // 단계 연출 + 실제 조회 대기
+      payload = await request;
+      await playStampSequence(payload.review); // 판정 도장 연출
+      hideVerifyStage();
+    } else {
+      payload = await request;
+    }
     const previousGrade = state.checklist.current?.grade;
     state.checklist.current = payload.review;
     await refreshChecklistSummaries();
     renderLedger();
+    // 검증이 끝나면 대시보드형 리포트를 등장 연출과 함께 보여준다
+    state.checklist.reportEntrance = cinematic;
+    setChecklistView("report");
     renderChecklistModal(previousGrade !== payload.review.grade);
+    elements.checklistReport.scrollTop = 0;
     const errorCount = Object.keys(payload.errors || {}).length;
     showToast(
       errorCount > 0
-        ? `자동 검증 완료 — 데이터 미확인 ${errorCount}건은 수동 확인이 필요합니다`
-        : "자동 검증이 완료되었습니다",
+        ? `리포트 생성 완료 — 데이터 미확인 ${errorCount}건은 수동 확인이 필요합니다`
+        : "자동 검증 완료 — 리포트가 생성되었습니다",
     );
   } catch {
+    if (cinematic) {
+      hideVerifyStage();
+      setChecklistView(state.checklist.view);
+    }
     showToast("자동 검증에 실패했습니다");
   } finally {
     button.disabled = false;
@@ -1884,6 +2218,12 @@ document.querySelector("#checklistEvaluateButton").addEventListener("click", () 
 });
 elements.checklistProfile.addEventListener("change", () => {
   void switchChecklistProfile();
+});
+document.querySelector("#viewReportTab").addEventListener("click", () => {
+  setChecklistView("report");
+});
+document.querySelector("#viewItemsTab").addEventListener("click", () => {
+  setChecklistView("items");
 });
 
 document.querySelector("#mapSearchForm").addEventListener("submit", (event) => {

@@ -33,7 +33,7 @@
         <header class="topbar reveal">
           <div>
             <p class="eyebrow">210 Orthopedics · Property Console</p>
-            <h1>병원 건물 매입, <em>좋은 매물</em>을 놓치지 않게</h1>
+            <h1>병원 건물 매입, <em>좋은 매물</em>을 가장 먼저 찾아냅니다</h1>
           </div>
           <div class="topbar-actions">
             <button type="button" class="button secondary" id="resetButton">
@@ -386,9 +386,19 @@
             </button>
           </div>
         </div>
+        <div class="verify-stage" id="verifyStage" hidden aria-live="polite">
+          <div class="verify-beam" aria-hidden="true"></div>
+          <ol class="verify-steps" id="verifySteps"></ol>
+          <div class="verify-stamps" id="verifyStamps"></div>
+        </div>
+        <div class="checklist-view-toggle" role="tablist" aria-label="검토 보기 전환">
+          <button type="button" class="view-tab active" id="viewReportTab" role="tab">📊 리포트</button>
+          <button type="button" class="view-tab" id="viewItemsTab" role="tab">☑ 항목 체크</button>
+        </div>
+        <div class="checklist-report" id="checklistReport"></div>
         <div class="checklist-sections" id="checklistSections"></div>
       </div>
     </dialog>
-    <script type="module" src="app.js?v=20260612i"></script>
+    <script type="module" src="app.js?v=20260612l"></script>
   </body>
 </html>
