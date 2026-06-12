@@ -1,3 +1,4 @@
+import base64
 import http.client
 import json
 import os
@@ -324,6 +325,52 @@ class ChecklistApiTests(unittest.TestCase):
         self.assertTrue(response["listings"][0]["first_seen_at"])
 
 
+class DashboardAuthTests(unittest.TestCase):
+    def test_password_protects_api_and_static(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                with mock.patch.dict("os.environ", {"DASHBOARD_PASSWORD": "secret210"}):
+                    with self.assertRaises(AssertionError):
+                        _request_json(server, "GET", "/api/listings")
+                    with self.assertRaises(AssertionError):
+                        _request_json(
+                            server, "GET", "/api/listings",
+                            headers=_basic_auth("210", "wrong-password"),
+                        )
+                    ok = _request_json(
+                        server, "GET", "/api/listings",
+                        headers=_basic_auth("아무거나", "secret210"),
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertIn("listings", ok)
+
+    def test_no_password_means_open_local_access(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            clean_env = {k: v for k, v in os.environ.items() if k != "DASHBOARD_PASSWORD"}
+            try:
+                with mock.patch.dict("os.environ", clean_env, clear=True):
+                    response = _request_json(server, "GET", "/api/ledger")
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertIn("entries", response)
+
+
+def _basic_auth(user: str, password: str) -> dict[str, str]:
+    token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+    return {"Authorization": f"Basic {token}"}
+
+
 def _write_fixture_config(root: Path) -> Path:
     listings_path = root / "listings.json"
     listings_path.write_text(
@@ -388,11 +435,17 @@ def _start_server(config_path: Path, web_root: Path) -> ThreadingHTTPServer:
     return server
 
 
-def _request_json(server: ThreadingHTTPServer, method: str, path: str, payload: dict | None = None) -> dict:
+def _request_json(
+    server: ThreadingHTTPServer,
+    method: str,
+    path: str,
+    payload: dict | None = None,
+    headers: dict[str, str] | None = None,
+) -> dict:
     connection = http.client.HTTPConnection(server.server_address[0], server.server_address[1], timeout=5)
     try:
         body_bytes = None
-        headers = {}
+        headers = dict(headers or {})
         if payload is not None:
             body_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json; charset=utf-8"

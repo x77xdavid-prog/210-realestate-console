@@ -6,6 +6,7 @@ data/
 config.json
 config.local.json
 .env
+start-dashboard.bat
 
 # 개인 수집 이미지
 이미지/

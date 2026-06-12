@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
+import hmac
 import json
+import os
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -27,6 +30,10 @@ from realestate_alert.verify import verify_address
 
 MAX_BODY_BYTES = 256 * 1024
 
+# 설정 시 모든 요청에 브라우저 기본 로그인(아이디 무관, 비밀번호 일치)을 요구한다.
+# 로컬 전용 사용이면 비워 두면 된다 — 클라우드 공개 배포 시 필수.
+DASHBOARD_PASSWORD_ENV = "DASHBOARD_PASSWORD"
+
 
 def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestHandler]:
     class RealEstateAlertHandler(SimpleHTTPRequestHandler):
@@ -34,6 +41,9 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
             super().__init__(*args, directory=str(web_root), **kwargs)
 
         def do_GET(self) -> None:
+            if not self._authorized():
+                self._send_unauthorized()
+                return
             if self.path == "/api/listings":
                 self._send_json(_listings_payload(config_path))
                 return
@@ -89,6 +99,9 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
             super().do_GET()
 
         def do_POST(self) -> None:
+            if not self._authorized():
+                self._send_unauthorized()
+                return
             if self.path == "/api/scan":
                 result = run_once(load_config(config_path))
                 self._send_json(
@@ -268,6 +281,30 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
 
         def log_message(self, format: str, *args) -> None:
             return
+
+        def _authorized(self) -> bool:
+            password = os.environ.get(DASHBOARD_PASSWORD_ENV, "").strip()
+            if not password:
+                return True
+            header = self.headers.get("Authorization", "")
+            if not header.startswith("Basic "):
+                return False
+            try:
+                decoded = base64.b64decode(header[6:]).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                return False
+            # 아이디는 무엇이든 허용하고 비밀번호만 검사한다
+            _, _, provided = decoded.partition(":")
+            return hmac.compare_digest(provided, password)
+
+        def _send_unauthorized(self) -> None:
+            body = "로그인이 필요합니다. 아이디는 아무거나, 비밀번호를 입력하세요.".encode("utf-8")
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="210 Property Console", charset="UTF-8"')
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def _read_json_body(self) -> dict[str, Any]:
             try:
