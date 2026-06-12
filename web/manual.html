@@ -1,0 +1,945 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>사용 설명서 · 210정형외과 부동산 매물 콘솔</title>
+    <style>
+      @import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css");
+
+      :root {
+        color-scheme: light;
+        --ink: #0d2436;
+        --ink-soft: #3d5a73;
+        --ink-faint: #7e93a6;
+        --surface: rgba(255, 255, 255, 0.78);
+        --surface-strong: rgba(255, 255, 255, 0.94);
+        --line: rgba(13, 36, 54, 0.09);
+        --line-strong: rgba(13, 36, 54, 0.16);
+        --teal: #0e7490;
+        --teal-bright: #0ea5b7;
+        --teal-soft: #e6f5f7;
+        --navy: #123a56;
+        --rose: #e11d48;
+        --rose-soft: #fde8ed;
+        --amber: #f59e0b;
+        --green: #0f9d58;
+        --green-soft: #e7f6ec;
+        --radius-lg: 22px;
+        --radius-md: 16px;
+        --radius-sm: 10px;
+        --shadow-float: 0 1px 2px rgba(13, 36, 54, 0.04), 0 12px 32px -12px rgba(13, 36, 54, 0.14);
+        --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      * { box-sizing: border-box; }
+
+      html { scroll-behavior: smooth; }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        font-family: "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+        color: var(--ink);
+        background: #f5f8fa;
+        line-height: 1.65;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: -2;
+        background:
+          radial-gradient(46rem 30rem at 8% -6%, rgba(14, 165, 183, 0.13), transparent 60%),
+          radial-gradient(38rem 26rem at 96% 4%, rgba(18, 58, 86, 0.1), transparent 65%),
+          linear-gradient(180deg, #fbfdfe 0%, #f3f7fa 100%);
+      }
+
+      body::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        background-image: linear-gradient(rgba(13, 36, 54, 0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(13, 36, 54, 0.025) 1px, transparent 1px);
+        background-size: 44px 44px;
+        mask-image: radial-gradient(80rem 50rem at 50% 0%, rgba(0, 0, 0, 0.8), transparent 80%);
+      }
+
+      .manual-shell {
+        display: grid;
+        grid-template-columns: 264px minmax(0, 1fr);
+        gap: 28px;
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 28px;
+      }
+
+      /* ===== TOC sidebar ===== */
+      .toc {
+        position: sticky;
+        top: 28px;
+        align-self: start;
+        display: flex;
+        flex-direction: column;
+        gap: 22px;
+        padding: 24px 20px;
+        border-radius: var(--radius-lg);
+        background: var(--surface);
+        border: 1px solid var(--line);
+        backdrop-filter: blur(18px);
+        box-shadow: var(--shadow-float);
+        max-height: calc(100vh - 56px);
+        overflow-y: auto;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .brand-mark {
+        display: grid;
+        place-items: center;
+        width: 44px;
+        height: 44px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, var(--navy), var(--teal-bright));
+        color: #fff;
+        font-weight: 800;
+        font-size: 0.95rem;
+        letter-spacing: 0.02em;
+        flex-shrink: 0;
+      }
+
+      .brand strong { display: block; font-size: 1rem; }
+      .brand span { font-size: 0.68rem; letter-spacing: 0.14em; color: var(--ink-faint); }
+
+      .toc nav { display: flex; flex-direction: column; gap: 3px; }
+
+      .toc-link {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 9px 12px;
+        border-radius: 11px;
+        color: var(--ink-soft);
+        font-size: 0.88rem;
+        font-weight: 600;
+        text-decoration: none;
+        transition: background 0.25s var(--ease-out), color 0.25s var(--ease-out), transform 0.25s var(--ease-out);
+      }
+
+      .toc-link::before {
+        content: "";
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.35;
+        flex-shrink: 0;
+      }
+
+      .toc-link:hover {
+        background: rgba(14, 116, 144, 0.07);
+        color: var(--teal);
+        transform: translateX(3px);
+      }
+
+      .back-button {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 11px 14px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, var(--navy), var(--teal));
+        color: #fff;
+        font-size: 0.9rem;
+        font-weight: 700;
+        text-decoration: none;
+        transition: transform 0.25s var(--ease-out), box-shadow 0.25s var(--ease-out);
+      }
+
+      .back-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 24px -10px rgba(14, 116, 144, 0.45);
+      }
+
+      /* ===== Content ===== */
+      .content { display: flex; flex-direction: column; gap: 26px; min-width: 0; }
+
+      .hero {
+        padding: 34px 36px;
+        border-radius: var(--radius-lg);
+        background: var(--surface-strong);
+        border: 1px solid var(--line);
+        box-shadow: var(--shadow-float);
+      }
+
+      .eyebrow {
+        margin: 0 0 6px;
+        font-size: 0.72rem;
+        font-weight: 800;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--teal);
+      }
+
+      .hero h1 {
+        margin: 0 0 10px;
+        font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2.2rem);
+        line-height: 1.25;
+      }
+
+      .hero h1 em { font-style: normal; color: var(--teal); }
+      .hero p { margin: 0; color: var(--ink-soft); max-width: 60ch; }
+
+      section.card {
+        padding: 30px 34px;
+        border-radius: var(--radius-lg);
+        background: var(--surface-strong);
+        border: 1px solid var(--line);
+        box-shadow: var(--shadow-float);
+        scroll-margin-top: 24px;
+      }
+
+      .kicker {
+        margin: 0 0 4px;
+        font-size: 0.7rem;
+        font-weight: 800;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        color: var(--teal);
+      }
+
+      section.card h2 {
+        margin: 0 0 14px;
+        font-size: 1.35rem;
+        line-height: 1.3;
+      }
+
+      section.card h3 {
+        margin: 26px 0 10px;
+        font-size: 1.02rem;
+        color: var(--navy);
+      }
+
+      section.card p { margin: 0 0 12px; color: var(--ink-soft); }
+      section.card p strong, section.card li strong { color: var(--ink); }
+
+      ul.plain { margin: 0 0 12px; padding-left: 20px; color: var(--ink-soft); }
+      ul.plain li { margin-bottom: 6px; }
+
+      /* Step list */
+      ol.steps {
+        margin: 0 0 12px;
+        padding: 0;
+        list-style: none;
+        counter-reset: step;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      ol.steps li {
+        counter-increment: step;
+        position: relative;
+        padding: 12px 16px 12px 52px;
+        border-radius: var(--radius-md);
+        background: rgba(14, 116, 144, 0.04);
+        border: 1px solid rgba(14, 116, 144, 0.1);
+        color: var(--ink-soft);
+      }
+
+      ol.steps li::before {
+        content: counter(step);
+        position: absolute;
+        left: 14px;
+        top: 12px;
+        display: grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--navy), var(--teal-bright));
+        color: #fff;
+        font-size: 0.8rem;
+        font-weight: 800;
+      }
+
+      /* Tables */
+      .table-wrap { overflow-x: auto; margin: 0 0 12px; }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+        min-width: 480px;
+      }
+
+      th, td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--line);
+        vertical-align: top;
+      }
+
+      th {
+        font-size: 0.74rem;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-faint);
+        white-space: nowrap;
+      }
+
+      td { color: var(--ink-soft); }
+      td:first-child { color: var(--ink); font-weight: 700; white-space: nowrap; }
+
+      /* Chips & badges */
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 11px;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        background: var(--teal-soft);
+        color: var(--teal);
+        border: 1px solid rgba(14, 116, 144, 0.18);
+        white-space: nowrap;
+      }
+
+      .chip.rose { background: var(--rose-soft); color: var(--rose); border-color: rgba(225, 29, 72, 0.2); }
+      .chip.green { background: var(--green-soft); color: var(--green); border-color: rgba(15, 157, 88, 0.2); }
+      .chip.amber { background: #fdf3e0; color: #b45309; border-color: rgba(245, 158, 11, 0.25); }
+      .chip.gray { background: rgba(13, 36, 54, 0.05); color: var(--ink-soft); border-color: var(--line-strong); }
+
+      .btn-sample {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 9px;
+        background: linear-gradient(135deg, var(--navy), var(--teal));
+        color: #fff;
+        font-size: 0.82rem;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .btn-sample.secondary {
+        background: #fff;
+        color: var(--teal);
+        border: 1px solid rgba(14, 116, 144, 0.3);
+      }
+
+      /* Callouts */
+      .callout {
+        display: flex;
+        gap: 12px;
+        padding: 14px 18px;
+        margin: 14px 0;
+        border-radius: var(--radius-md);
+        font-size: 0.92rem;
+      }
+
+      .callout .icon { flex-shrink: 0; font-size: 1.05rem; line-height: 1.5; }
+      .callout p { margin: 0; }
+
+      .callout.tip {
+        background: var(--teal-soft);
+        border: 1px solid rgba(14, 116, 144, 0.18);
+        color: #0c5e75;
+      }
+
+      .callout.warn {
+        background: #fdf3e0;
+        border: 1px solid rgba(245, 158, 11, 0.3);
+        color: #8a4d04;
+      }
+
+      .callout.danger {
+        background: var(--rose-soft);
+        border: 1px solid rgba(225, 29, 72, 0.2);
+        color: #9f1239;
+      }
+
+      /* FAQ */
+      details {
+        margin-bottom: 10px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius-md);
+        background: rgba(255, 255, 255, 0.6);
+        overflow: hidden;
+      }
+
+      details summary {
+        padding: 14px 18px;
+        font-weight: 700;
+        cursor: pointer;
+        color: var(--ink);
+        list-style: none;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        transition: background 0.2s var(--ease-out);
+      }
+
+      details summary::before {
+        content: "▸";
+        color: var(--teal);
+        transition: transform 0.25s var(--ease-out);
+        flex-shrink: 0;
+      }
+
+      details[open] summary::before { transform: rotate(90deg); }
+      details summary:hover { background: rgba(14, 116, 144, 0.05); }
+      details .answer { padding: 0 18px 16px 38px; color: var(--ink-soft); font-size: 0.93rem; }
+      details .answer p { margin: 0 0 8px; }
+
+      code {
+        padding: 2px 7px;
+        border-radius: 6px;
+        background: rgba(13, 36, 54, 0.06);
+        font-family: Consolas, "Courier New", monospace;
+        font-size: 0.85em;
+        color: var(--navy);
+      }
+
+      footer {
+        text-align: center;
+        padding: 8px 0 20px;
+        color: var(--ink-faint);
+        font-size: 0.82rem;
+      }
+
+      @media (max-width: 900px) {
+        .manual-shell { grid-template-columns: minmax(0, 1fr); padding: 16px; }
+        .toc { position: static; max-height: none; }
+        .toc nav { flex-direction: row; flex-wrap: wrap; }
+        section.card, .hero { padding: 22px 20px; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html { scroll-behavior: auto; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="manual-shell">
+      <aside class="toc" aria-label="설명서 목차">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">210</span>
+          <div>
+            <strong>사용 설명서</strong>
+            <span>210 ORTHOPEDICS</span>
+          </div>
+        </div>
+        <nav aria-label="목차">
+          <a href="#intro" class="toc-link">이 서비스는 무엇인가요</a>
+          <a href="#access" class="toc-link">접속하기</a>
+          <a href="#layout" class="toc-link">화면 구성</a>
+          <a href="#scan" class="toc-link">신규 매물 스캔</a>
+          <a href="#criteria" class="toc-link">건물·토지 조건 설정</a>
+          <a href="#board" class="toc-link">매물 보드</a>
+          <a href="#ledger" class="toc-link">매물장 · 직접 등록</a>
+          <a href="#checklist" class="toc-link">체크리스트 검토</a>
+          <a href="#map" class="toc-link">지도 · 공공데이터 검증</a>
+          <a href="#finance" class="toc-link">매입 비용 계산</a>
+          <a href="#mail" class="toc-link">Gmail 알림</a>
+          <a href="#faq" class="toc-link">자주 묻는 질문</a>
+          <a href="#admin" class="toc-link">관리자 참고</a>
+        </nav>
+        <a href="index.html" class="back-button">← 대시보드로 돌아가기</a>
+      </aside>
+
+      <main class="content">
+        <header class="hero">
+          <p class="eyebrow">210 Orthopedics · Property Console Manual</p>
+          <h1>병원 건물 매입 콘솔, <em>이렇게 사용</em>하세요</h1>
+          <p>
+            매물 자동 수집부터 조건 비교, 체크리스트 검토, 매입 비용 계산까지 —
+            대시보드의 모든 기능을 처음 쓰는 분도 따라 할 수 있도록 정리한 설명서입니다.
+          </p>
+        </header>
+
+        <section class="card" id="intro">
+          <p class="kicker">Overview</p>
+          <h2>이 서비스는 무엇인가요</h2>
+          <p>
+            병원 건물 매입 후보를 찾기 위해 <strong>공공 매물 정보를 자동으로 수집</strong>하고,
+            설정한 조건과 비교해 <strong>맞는 매물만 골라 보여주는</strong> 검토 콘솔입니다.
+            신규 매물이 발견되면 Gmail로 알림 메일도 보내드립니다.
+          </p>
+
+          <h3>매물은 어디서 수집되나요</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>소스</th><th>내용</th><th>비고</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>온비드 공매</td>
+                  <td>양천·강서·구로·영등포구의 압류·국유·수탁 재산 공매 물건</td>
+                  <td>캠코 공식 데이터</td>
+                </tr>
+                <tr>
+                  <td>법원경매</td>
+                  <td>서울남부지방법원 관할(양천·강서·구로·영등포) 부동산 경매</td>
+                  <td>감정가·최저가·입찰 기간 표시</td>
+                </tr>
+                <tr>
+                  <td>LH 분양공고</td>
+                  <td>서울 지역 토지·상가 공급 공고 (신축 부지 후보)</td>
+                  <td>공고중·접수중 건만 수집</td>
+                </tr>
+                <tr>
+                  <td>직접 등록</td>
+                  <td>부동산 중개사무소에서 받은 매물을 서류와 함께 직접 입력</td>
+                  <td><a href="#ledger">매물장</a>에서 등록</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="callout tip">
+            <span class="icon">💡</span>
+            <p>
+              네이버 부동산은 공식 데이터 제공이 없어 자동 수집 대상이 아닙니다.
+              대신 매물마다 <strong>네이버 부동산을 해당 위치로 바로 여는 버튼</strong>을 제공해
+              주변 시세와 일반 매물을 함께 확인할 수 있습니다.
+            </p>
+          </div>
+        </section>
+
+        <section class="card" id="access">
+          <p class="kicker">Getting Started</p>
+          <h2>접속하기</h2>
+          <ol class="steps">
+            <li>안내받은 <strong>대시보드 주소</strong>를 브라우저(크롬 권장)에서 엽니다. 휴대폰에서도 열립니다.</li>
+            <li>
+              아이디와 비밀번호를 묻는 창이 뜨면 —
+              <strong>아이디는 아무 값이나(또는 비워도) 되고, 비밀번호만 정확히</strong> 입력합니다.
+            </li>
+            <li>로그인 후 첫 화면(현황)이 보이면 준비 완료입니다. 주소를 <strong>즐겨찾기에 추가</strong>해 두세요.</li>
+          </ol>
+          <div class="callout warn">
+            <span class="icon">🔒</span>
+            <p>
+              비밀번호는 보안을 위해 이 문서에 적지 않습니다. 별도로 전달받은 값을 사용하시고,
+              잊으셨다면 관리자에게 문의하세요.
+            </p>
+          </div>
+        </section>
+
+        <section class="card" id="layout">
+          <p class="kicker">Tour</p>
+          <h2>화면 구성</h2>
+          <p>왼쪽 메뉴로 각 영역으로 이동하고, 오른쪽 위 버튼으로 스캔과 초기화를 실행합니다.</p>
+
+          <h3>왼쪽 메뉴</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>메뉴</th><th>하는 일</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>현황</td><td>수집·조건 일치·신규·관심 매물 수를 한눈에 표시. 카드를 클릭하면 해당 목록으로 이동</td></tr>
+                <tr><td>매물 보드</td><td>수집된 매물을 카드로 살펴보고 관심 등록·매물장 추가</td></tr>
+                <tr><td>매물장</td><td>검토 중인 매물의 상태·메모·서류·체크리스트를 관리</td></tr>
+                <tr><td>지도</td><td>매물 위치 확인, 주소 검색, 공공데이터 검증</td></tr>
+                <tr><td>매입 계산</td><td>취득세·중개보수·대출까지 포함한 필요 자금 추정</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>상단 버튼</h3>
+          <ul class="plain">
+            <li><span class="btn-sample">⌕ 신규 매물 스캔</span> — 모든 소스에서 매물을 새로 수집합니다.</li>
+            <li><span class="btn-sample secondary">↺ 초기화</span> — 조건·계산기 입력값을 기본값으로 되돌립니다. (매물장·관심 매물은 지워지지 않습니다)</li>
+          </ul>
+
+          <h3>현황 카드 4종</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>카드</th><th>의미</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>⌂ 수집 매물</td><td>이번 스캔에서 모든 소스로부터 가져온 전체 매물 수</td></tr>
+                <tr><td>✓ 조건 일치</td><td>지역·예산·면적·키워드 기본 조건을 통과한 매물 수</td></tr>
+                <tr><td>★ 신규 매물</td><td>최근 72시간 안에 처음 발견된 매물 수. 24시간 이내 건은 깜빡이는 NEW 배지 표시</td></tr>
+                <tr><td>♥ 관심 매물</td><td>하트를 눌러 보관해 둔 검토 후보 수</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card" id="scan">
+          <p class="kicker">Scan</p>
+          <h2>신규 매물 스캔</h2>
+          <ol class="steps">
+            <li>오른쪽 위 <span class="btn-sample">⌕ 신규 매물 스캔</span> 버튼을 누릅니다.</li>
+            <li>수집은 <strong>화면 뒤에서(백그라운드)</strong> 진행됩니다. 소스가 많아 수십 초 걸릴 수 있습니다.</li>
+            <li>잠시 후 화면이 갱신되며, 새로 발견된 매물이 있으면 상단에 <strong>★ 신규 매물 배너</strong>가 나타납니다.</li>
+            <li>배너의 <span class="btn-sample">신규만 보기</span>를 누르면 신규 매물만 모아 볼 수 있습니다.</li>
+          </ol>
+          <div class="callout tip">
+            <span class="icon">💡</span>
+            <p>
+              스캔 결과는 약 10분 동안 재사용됩니다. 방금 스캔했다면 같은 결과가 보이는 것이 정상이고,
+              10분이 지난 뒤 다시 스캔하면 새로 수집합니다.
+            </p>
+          </div>
+        </section>
+
+        <section class="card" id="criteria">
+          <p class="kicker">Acquisition Criteria</p>
+          <h2>건물·토지 조건 설정</h2>
+          <p>
+            <strong>건물·토지 조건 설정</strong> 패널에서 병원에 필요한 최소 조건을 입력하면,
+            매물 보드의 <span class="chip">⛳ 필수조건</span> 필터와 카드별 조건 판정에 바로 반영됩니다.
+          </p>
+
+          <h3>빠른 시작 — 프리셋</h3>
+          <ul class="plain">
+            <li><strong>기존 건물</strong> 프리셋: 대지 150평 · 연면적 600평 기준으로 건물 매입 조건을 채웁니다.</li>
+            <li><strong>신축용 토지</strong> 프리셋: 대지 150평 · 접도 6m 기준으로 토지 조건을 채웁니다.</li>
+          </ul>
+
+          <h3>입력 항목</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>구분</th><th>항목</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>건물 매입 필수</td><td>최소 대지, 최소 건평/연면적, 최소 층수, 최소 주차 대수, 엘리베이터(필수/우선/무관), 승인연도 하한</td></tr>
+                <tr><td>토지 신축 가능성</td><td>허용 용도지역, 최소 접도 폭, 최대 건폐율, 최소 용적률, 필수 확인 항목</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <ul class="plain">
+            <li>면적은 <strong>㎡와 평 중 어느 쪽을 입력해도 자동 환산</strong>됩니다.</li>
+            <li>입력하면 즉시 자동 적용·저장되고, <span class="btn-sample">조건 저장</span> 버튼을 누르면 저장 시각이 표시되며 확정됩니다.</li>
+            <li><span class="btn-sample secondary">기본값</span> 버튼으로 언제든 처음 설정으로 되돌릴 수 있습니다.</li>
+          </ul>
+
+          <h3>조건 판정 3그룹</h3>
+          <p>⛳ 필수조건 필터에서는 수집 매물이 세 그룹으로 분류됩니다.</p>
+          <ul class="plain">
+            <li><span class="chip green">✅ 충족</span> — 입력한 조건을 모두 만족</li>
+            <li><span class="chip amber">❓ 확인 필요</span> — 매물 정보가 부족해 판정 불가 (예: 주차 대수 미기재). 공공데이터 검증으로 채울 수 있음</li>
+            <li><span class="chip gray">미달</span> — 한 가지 이상 조건에 못 미침</li>
+          </ul>
+        </section>
+
+        <section class="card" id="board">
+          <p class="kicker">Listing Board</p>
+          <h2>매물 보드</h2>
+          <p>수집된 매물이 카드로 나열됩니다. 상단의 필터 칩으로 보고 싶은 그룹을 고르세요.</p>
+
+          <h3>필터 칩</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>필터</th><th>표시 내용</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>조건 일치</td><td>지역·예산·면적·키워드 기본 조건을 통과한 매물 (기본 화면)</td></tr>
+                <tr><td>★ 신규</td><td>최근 72시간 내 처음 발견된 매물 — 최신순 우선 정렬</td></tr>
+                <tr><td>♥ 관심</td><td>하트를 눌러 보관한 매물</td></tr>
+                <tr><td>⛳ 필수조건</td><td>조건 설정 기준 충족/확인 필요/미달 3그룹 분류</td></tr>
+                <tr><td>수집 전체</td><td>조건과 무관하게 수집된 모든 매물</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>카드에서 할 수 있는 일</h3>
+          <ul class="plain">
+            <li><strong>♥ 하트</strong> — 관심 매물로 보관/해제. 관심 목록과 현황 카드에 바로 반영됩니다.</li>
+            <li><strong>매물장 추가</strong> — 본격 검토할 매물을 <a href="#ledger">매물장</a>으로 보냅니다.</li>
+            <li><strong>네이버 부동산 / 지도</strong> — 매물 위치 기준으로 네이버 부동산·지도를 새 탭에서 엽니다.</li>
+          </ul>
+          <div class="callout tip">
+            <span class="icon">💡</span>
+            <p>
+              공매·경매 매물은 보증금/월세 대신 <strong>감정가·최저입찰가·입찰 기간</strong>이 메모에 표시됩니다.
+              온비드 물건은 onbid.co.kr에서 물건관리번호로 검색하면 상세 정보를 볼 수 있습니다.
+            </p>
+          </div>
+        </section>
+
+        <section class="card" id="ledger">
+          <p class="kicker">Property Ledger</p>
+          <h2>매물장 · 직접 등록</h2>
+          <p>
+            매물장은 <strong>실제로 검토 중인 매물의 진행 상황을 관리하는 장부</strong>입니다.
+            보드에서 추가한 매물과 직접 등록한 매물이 모두 모입니다.
+          </p>
+
+          <h3>부동산에서 받은 매물 직접 등록</h3>
+          <ol class="steps">
+            <li>매물장의 <span class="btn-sample">📄 직접 등록 (부동산 서류)</span> 버튼을 누릅니다.</li>
+            <li><strong>매물명</strong>과 <strong>지번 주소</strong>(예: 서울 양천구 목동 917-9)는 필수입니다. 지번 주소가 정확해야 체크리스트 자동 검증이 동작합니다.</li>
+            <li>매매가·유형(건물/토지)·면적·층수·주차는 아는 만큼 입력합니다. 비워 두면 공공데이터 검증이 채워 주기도 합니다.</li>
+            <li>부동산에서 받은 <strong>PDF·사진 서류를 첨부</strong>할 수 있습니다 (여러 개 가능, 개당 최대 15MB).</li>
+            <li>메모에 부동산 연락처나 특이사항을 적고 <span class="btn-sample">매물장에 등록</span>을 누릅니다.</li>
+          </ol>
+
+          <h3>진행 상태 관리</h3>
+          <p>매물마다 상태를 골라 진행 단계를 표시합니다:</p>
+          <p>
+            <span class="chip gray">검토중</span>
+            <span class="chip">연락 완료</span>
+            <span class="chip">방문 예정</span>
+            <span class="chip amber">협상중</span>
+            <span class="chip gray">보류</span>
+            <span class="chip green">계약 검토</span>
+          </p>
+          <ul class="plain">
+            <li><strong>메모</strong>는 입력하면 자동 저장됩니다.</li>
+            <li><strong>받은 서류</strong>는 매물별로 보관되며 나중에 추가할 수도 있습니다.</li>
+            <li><span class="btn-sample secondary">⇩ 매물장 CSV</span> — 전체 매물장을 엑셀에서 열 수 있는 CSV 파일로 내려받습니다.</li>
+            <li><strong>체크리스트 검토</strong> 버튼으로 매물별 정밀 검토를 시작합니다. (다음 섹션)</li>
+          </ul>
+        </section>
+
+        <section class="card" id="checklist">
+          <p class="kicker">Checklist Review</p>
+          <h2>체크리스트 검토</h2>
+          <p>
+            병원 건물 매입·신축 체크리스트를 기준으로 매물을 정밀 검토합니다.
+            공공데이터로 확인 가능한 항목은 <strong>자동 판정</strong>하고, 현장 확인이 필요한 항목은 직접 체크합니다.
+          </p>
+
+          <h3>검토 프로필 3종</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>프로필</th><th>언제 선택하나요</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>기존 건물 사용 (매입)</td><td>건물을 사서 리모델링 후 그대로 쓰려는 경우</td></tr>
+                <tr><td>철거 후 신축</td><td>건물 딸린 땅을 사서 허물고 새로 지으려는 경우</td></tr>
+                <tr><td>나대지 신축</td><td>빈 땅을 사서 새로 지으려는 경우</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p>프로필에 따라 검토 항목이 달라지므로, 매입 방식에 맞는 프로필을 먼저 고르세요.</p>
+
+          <h3>자동 검증 실행</h3>
+          <ol class="steps">
+            <li>매물장에서 <strong>체크리스트 검토</strong>를 열고 프로필을 선택합니다.</li>
+            <li><span class="btn-sample">자동 검증 실행</span>을 누르면 6단계 검증이 진행됩니다.</li>
+            <li>완료되면 등급과 함께 <strong>추천 액션이 담긴 리포트</strong>가 자동 생성됩니다.</li>
+          </ol>
+          <p>자동으로 판정되는 항목:</p>
+          <ul class="plain">
+            <li>용도지역 (병원 입지 가능 여부)</li>
+            <li>도로 접면 (접도 폭)</li>
+            <li>주차 대수 · 승강기 유무</li>
+            <li>주변 실거래 시세 비교</li>
+            <li>건물 노후도 (사용승인 연도)</li>
+            <li><strong>같은 동의 정형외과 경쟁 의원·약국 현황</strong> (심평원 데이터)</li>
+          </ul>
+
+          <h3>등급 읽는 법</h3>
+          <ul class="plain">
+            <li><span class="chip green">A · B</span> — 적극 검토 권장 / 양호</li>
+            <li><span class="chip amber">C · D</span> — 보완 확인 필요 / 신중 검토</li>
+            <li><span class="chip rose">부적합</span> — <strong>치명 항목(예: 병원 용도 불가)이 하나라도 부적합</strong>이면 점수와 무관하게 즉시 부적합 처리</li>
+          </ul>
+          <p>
+            <strong>📊 리포트</strong> 탭에서 요약과 추천 액션을 보고,
+            <strong>☑ 항목 체크</strong> 탭에서 항목별로 직접 적합/부적합/보류를 표시하고 메모를 남길 수 있습니다.
+            수동 체크 결과도 등급에 반영됩니다.
+          </p>
+        </section>
+
+        <section class="card" id="map">
+          <p class="kicker">Map &amp; Public Data</p>
+          <h2>지도 · 공공데이터 검증</h2>
+          <p>지도 패널에서는 매물 필지 위치가 핀으로 표시되고, 주소를 검색해 검토할 수 있습니다.</p>
+
+          <h3>사용 방법</h3>
+          <ol class="steps">
+            <li>매물 카드를 클릭하거나, 지도 패널에서 <strong>지번 주소를 직접 검색</strong>합니다.</li>
+            <li>오른쪽 정보 패널에 주소·조건 판정·면적 등 매물 요약이 표시됩니다.</li>
+            <li><span class="btn-sample">네이버 부동산 열기</span> — 매물 좌표 중심으로 네이버 부동산이 새 탭에서 열립니다.</li>
+            <li><span class="btn-sample secondary">매입 계산에 반영</span> — 매물 가격을 아래 매입 비용 계산기로 보냅니다.</li>
+          </ol>
+          <div class="callout warn">
+            <span class="icon">ℹ️</span>
+            <p>
+              네이버 부동산·지도는 보안 정책상 대시보드 화면 안에 직접 표시되지 않습니다.
+              그래서 버튼을 누르면 <strong>새 탭으로 열리는 방식</strong>입니다.
+            </p>
+          </div>
+
+          <h3>공공데이터 검증</h3>
+          <p>
+            <span class="btn-sample">공공데이터 검증 (건축물대장·용도지역·실거래가)</span> 버튼을 누르면
+            지번 주소 하나로 다음을 한 번에 조회합니다:
+          </p>
+          <ul class="plain">
+            <li><strong>건축물대장</strong> — 층수, 연면적, 주차, 승강기, 사용승인 연도, 건폐율/용적률</li>
+            <li><strong>토지정보</strong> — 용도지역, 도로 접면, 개별공시지가</li>
+            <li><strong>실거래가</strong> — 주변 상업·업무용 건물의 최근 거래 내역</li>
+          </ul>
+          <p>
+            조회된 값은 매물의 <strong>비어 있던 정보에 자동으로 채워져</strong>
+            조건 판정(❓확인 필요 → ✅/미달)과 체크리스트 정확도가 올라갑니다.
+          </p>
+        </section>
+
+        <section class="card" id="finance">
+          <p class="kicker">Acquisition Cost</p>
+          <h2>매입 비용 계산</h2>
+          <p>매입가만 입력하면 끝이 아닙니다 — 취득세·중개보수·대출 이자까지 포함해 실제 필요한 자금을 추정합니다.</p>
+          <ol class="steps">
+            <li><strong>매입가, 자기자본(보유 현금), 인테리어·장비 예산</strong>을 입력합니다. 금액 칸은 자동으로 콤마와 한글 단위(억/만)가 표시됩니다.</li>
+            <li>취득세율·중개보수율·대출 금리·대출 기간은 기본값이 들어 있으며 필요시 조정합니다.</li>
+            <li>아래 결과에서 <strong>총 매입 비용, 부족 자금(대출 필요액), 월 상환액</strong>(원리금균등 가정)을 확인합니다.</li>
+            <li>자기자본이 크게 부족하면 경고가 표시됩니다.</li>
+          </ol>
+          <div class="callout danger">
+            <span class="icon">⚠️</span>
+            <p>
+              계산 결과는 <strong>설정값 기반 추정치</strong>입니다. 취득세는 물건 종류·금액 구간·법령에 따라 달라지므로,
+              실제 매입 전에 반드시 은행 한도 조회와 세무사 검토를 거치세요.
+            </p>
+          </div>
+        </section>
+
+        <section class="card" id="mail">
+          <p class="kicker">Notification</p>
+          <h2>Gmail 알림</h2>
+          <p>
+            스캔에서 <strong>신규 매물이 발견되면</strong> 설정된 Gmail 주소로 알림 메일이 자동 발송됩니다.
+            메일에는 매물 요약과 네이버 부동산·지도 바로가기 링크가 들어 있어, 휴대폰에서도 바로 확인할 수 있습니다.
+          </p>
+          <p>
+            받는 주소를 바꾸거나 추가하려면 관리자에게 요청하세요.
+            (설정 파일의 <code>notifiers</code> 항목에서 변경합니다)
+          </p>
+        </section>
+
+        <section class="card" id="faq">
+          <p class="kicker">FAQ</p>
+          <h2>자주 묻는 질문</h2>
+
+          <details>
+            <summary>스캔을 눌렀는데 매물 수가 바로 안 바뀌어요</summary>
+            <div class="answer">
+              <p>
+                수집은 화면 뒤에서 진행되어 수십 초 걸릴 수 있습니다. 잠시 기다린 뒤
+                새로고침(F5)해 보세요. 또한 결과는 약 10분간 재사용되므로,
+                방금 스캔한 직후라면 같은 숫자가 보이는 것이 정상입니다.
+              </p>
+            </div>
+          </details>
+
+          <details>
+            <summary>지도가 표시되지 않아요</summary>
+            <div class="answer">
+              <p>
+                지도 아래의 <strong>다시 불러오기</strong> 버튼을 누르거나, <strong>새 탭에서 열기</strong>로 확인하세요.
+                네이버 부동산·지도 본 화면은 보안 정책상 대시보드 안에 직접 표시되지 않아 새 탭으로 열립니다.
+              </p>
+            </div>
+          </details>
+
+          <details>
+            <summary>매물이 너무 적게 / 너무 많이 보여요</summary>
+            <div class="answer">
+              <p>
+                기본 화면은 "조건 일치" 필터입니다. <strong>수집 전체</strong> 칩을 누르면 모든 매물이 보입니다.
+                반대로 너무 많다면 <strong>⛳ 필수조건</strong> 칩에서 조건 설정 패널의 기준으로 추린 결과를 보세요.
+              </p>
+            </div>
+          </details>
+
+          <details>
+            <summary>조건 판정이 "❓ 확인 필요"로 나와요</summary>
+            <div class="answer">
+              <p>
+                매물 정보에 주차 대수·승강기 등 판정에 필요한 값이 빠져 있는 경우입니다.
+                지도 패널에서 해당 매물의 <strong>공공데이터 검증</strong>을 실행하면 건축물대장 값이
+                자동으로 채워져 판정이 갱신됩니다.
+              </p>
+            </div>
+          </details>
+
+          <details>
+            <summary>체크리스트 자동 검증이 동작하지 않아요</summary>
+            <div class="answer">
+              <p>
+                매물의 <strong>지번 주소</strong>(예: 서울 양천구 목동 917-9)가 정확해야 자동 검증이 동작합니다.
+                직접 등록한 매물이라면 주소를 지번 형식으로 수정해 보세요.
+                현재 자동 검증은 양천구(목동·신정동·신월동) 주소를 지원합니다.
+              </p>
+            </div>
+          </details>
+
+          <details>
+            <summary>알림 메일이 오지 않아요</summary>
+            <div class="answer">
+              <p>
+                신규 매물이 없으면 메일도 발송되지 않습니다. 한 번 알림이 나간 매물은 다시 보내지 않습니다.
+                신규 매물이 분명히 있는데도 오지 않는다면 스팸함을 확인하고, 그래도 없으면 관리자에게 문의하세요.
+              </p>
+            </div>
+          </details>
+
+          <details>
+            <summary>비밀번호를 잊었어요</summary>
+            <div class="answer">
+              <p>보안상 비밀번호는 문서에 기재하지 않습니다. 관리자에게 문의해 다시 안내받으세요.</p>
+            </div>
+          </details>
+
+          <details>
+            <summary>실수로 "초기화"를 눌렀어요. 매물장이 사라지나요?</summary>
+            <div class="answer">
+              <p>
+                아니요. 초기화는 조건 설정과 계산기 입력값만 기본값으로 되돌립니다.
+                매물장·관심 매물·체크리스트 검토 기록은 서버에 저장되어 있어 지워지지 않습니다.
+              </p>
+            </div>
+          </details>
+        </section>
+
+        <section class="card" id="admin">
+          <p class="kicker">For Administrators</p>
+          <h2>관리자 참고</h2>
+          <p>운영·설정 변경은 아래만 기억하면 됩니다. 자세한 내용은 저장소의 <code>README.md</code>를 참고하세요.</p>
+          <ul class="plain">
+            <li><strong>코드와 설정의 원본은 GitHub 저장소</strong>입니다. main 브랜치에 push하면 클라우드(Render)에 자동 배포됩니다.</li>
+            <li>
+              로컬 실행: <code>python -m realestate_alert serve-web --config config.example.json --port 8765</code>
+            </li>
+            <li>
+              민감한 값은 모두 <strong>환경 변수로만</strong> 관리합니다 (코드·문서에 저장 금지):
+              <code>DASHBOARD_PASSWORD</code>(접속 비밀번호),
+              <code>GMAIL_APP_PASSWORD</code>(메일 발송),
+              <code>DATA_GO_KR_API_KEY</code>(건축물대장·실거래가·온비드·LH·심평원),
+              <code>VWORLD_API_KEY</code>(용도지역·도로접면·지오코딩)
+            </li>
+            <li>API 키가 없으면 해당 소스만 건너뛰고 나머지 기능은 정상 동작합니다.</li>
+            <li>수집 소스·알림 수신자·검색 조건은 config 파일(<code>sources</code>, <code>notifiers</code>, <code>criteria</code>)에서 변경합니다.</li>
+          </ul>
+        </section>
+
+        <footer>
+          210정형외과 · 부동산 매물 콘솔 사용 설명서
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

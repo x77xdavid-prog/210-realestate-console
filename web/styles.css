@@ -198,6 +198,20 @@ select {
   transform: scale(1.35);
 }
 
+.nav-link-manual {
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 12px 12px;
+}
+
+.nav-link-manual::after {
+  content: "↗";
+  margin-left: auto;
+  font-size: 0.8rem;
+  opacity: 0.5;
+}
+
 .sidebar-note {
   margin-top: auto;
   padding: 16px;
