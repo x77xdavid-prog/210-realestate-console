@@ -514,6 +514,8 @@ def _listings_payload(config_path: Path) -> dict[str, Any]:
             is_favorite=listing.identity in favorites,
             is_match=is_match,
             first_seen_at=first_seen.get(listing.identity),
+            # 수집량이 수백 건이라 조건 일치 매물만 좌표 변환한다 (나머지는 선택 시 /api/geocode)
+            with_coords=is_match,
         )
 
     matched_ids = {listing.identity for listing in snapshot.matched}
@@ -539,8 +541,9 @@ def _listing_to_dict(
     is_favorite: bool = False,
     is_match: bool = True,
     first_seen_at: str | None = None,
+    with_coords: bool = True,
 ) -> dict[str, Any]:
-    coords = _safe_geocode(listing.location)
+    coords = _safe_geocode(listing.location) if with_coords else None
     return {
         "identity": listing.identity,
         "source": listing.source,
