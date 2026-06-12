@@ -1,0 +1,34 @@
+{
+  "database_path": "/data/seen.sqlite3",
+  "interval_seconds": 600,
+  "criteria": {
+    "locations": ["양천구"],
+    "max_deposit": 150000000,
+    "max_monthly_rent": 6000000,
+    "min_area_m2": 70,
+    "max_premium": 50000000,
+    "required_keywords": ["건물", "토지", "상가", "병원", "의원"]
+  },
+  "sources": [
+    {
+      "type": "json_file",
+      "path": "samples/listings.json"
+    },
+    {
+      "type": "onbid",
+      "sido": "서울특별시",
+      "sigungu": "양천구"
+    }
+  ],
+  "notifiers": [
+    {
+      "type": "console"
+    },
+    {
+      "type": "gmail",
+      "sender": "your-account@gmail.com",
+      "recipients": ["your-account@gmail.com"],
+      "password_env": "GMAIL_APP_PASSWORD"
+    }
+  ]
+}
