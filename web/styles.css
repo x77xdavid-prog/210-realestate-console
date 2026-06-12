@@ -1416,6 +1416,20 @@ td span {
   margin-top: 16px;
 }
 
+.criteria-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.criteria-saved {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--green);
+}
+
 /* ===== 필수조건 검색 ===== */
 .preset-row {
   display: flex;

@@ -2486,15 +2486,30 @@ document.querySelector("#criteriaResetButton").addEventListener("click", () => {
   refreshAssetViews();
   showToast("건물·토지 조건을 기본값으로 되돌렸습니다");
 });
+function applyCriteriaForm(showConfirmation) {
+  assetCriteria = readCriteriaFormValues();
+  persistCriteria();
+  refreshAssetViews();
+  const note = document.querySelector("#criteriaSavedNote");
+  if (note) {
+    note.textContent = `✓ 저장됨 ${new Date().toLocaleTimeString("ko-KR")}`;
+  }
+  if (showConfirmation) {
+    showToast("건물·토지 조건을 저장했습니다");
+  }
+}
+
 // 입력 즉시 적용 (타이핑 중 잦은 재렌더를 막기 위해 짧게 디바운스)
 let criteriaApplyTimer = null;
 elements.criteriaForm.addEventListener("input", () => {
   clearTimeout(criteriaApplyTimer);
-  criteriaApplyTimer = setTimeout(() => {
-    assetCriteria = readCriteriaFormValues();
-    persistCriteria();
-    refreshAssetViews();
-  }, 300);
+  criteriaApplyTimer = setTimeout(() => applyCriteriaForm(false), 300);
+});
+// 저장 버튼 — 즉시 확정 + 확인 메시지
+elements.criteriaForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  clearTimeout(criteriaApplyTimer);
+  applyCriteriaForm(true);
 });
 document.querySelector("#presetBuildingButton").addEventListener("click", () => {
   assetCriteria = { ...CRITERIA_PRESETS.building };

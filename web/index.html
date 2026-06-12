@@ -178,7 +178,11 @@
                 <input id="landRequiredChecksInput" type="text" value="건축 가능, 주차장 설치, 병원 용도 가능, 도로 접함" />
               </label>
             </form>
-            <p class="fine-print">입력 즉시 적용됩니다 — 매물 보드의 ⛳필수조건 그룹과 카드 조건 판정에 바로 반영.</p>
+            <div class="criteria-actions">
+              <span class="criteria-saved" id="criteriaSavedNote" aria-live="polite"></span>
+              <button type="submit" form="criteriaForm" class="button primary" id="criteriaSaveButton">조건 저장</button>
+            </div>
+            <p class="fine-print">입력하면 자동 적용·저장되고, [조건 저장]을 누르면 즉시 확정됩니다 — 매물 보드의 ⛳필수조건 그룹과 카드 조건 판정에 바로 반영.</p>
           </section>
 
           <section class="panel" aria-labelledby="priorityTitle">
@@ -492,6 +496,6 @@
         <div class="checklist-sections" id="checklistSections"></div>
       </div>
     </dialog>
-    <script type="module" src="app.js?v=20260612p"></script>
+    <script type="module" src="app.js?v=20260612q"></script>
   </body>
 </html>
