@@ -2108,6 +2108,65 @@ details.fit-group[open] > summary::before {
   gap: 6px;
 }
 
+.ledger-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ===== 받은 서류 관리 ===== */
+.docs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.doc-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+}
+
+.doc-row a {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: var(--teal);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-row a:hover {
+  text-decoration: underline;
+}
+
+.doc-size {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.manual-files-label {
+  margin-top: 14px;
+}
+
+.manual-files-label input[type="file"] {
+  padding: 9px;
+  background: rgba(14, 116, 144, 0.04);
+  border-style: dashed;
+}
+
 .ledger-review-cell .grade-badge {
   min-width: 46px;
   height: 30px;

@@ -237,10 +237,16 @@
               <p class="section-kicker">Property Ledger</p>
               <h2 id="ledgerTitle">매물장</h2>
             </div>
-            <button type="button" class="button secondary compact" id="ledgerExportButton">
-              <span class="icon" aria-hidden="true">⇩</span>
-              매물장 CSV
-            </button>
+            <div class="inline-actions">
+              <button type="button" class="button primary compact" id="manualAddButton">
+                <span class="icon" aria-hidden="true">📄</span>
+                직접 등록 (부동산 서류)
+              </button>
+              <button type="button" class="button secondary compact" id="ledgerExportButton">
+                <span class="icon" aria-hidden="true">⇩</span>
+                매물장 CSV
+              </button>
+            </div>
           </div>
           <div class="ledger-summary" id="ledgerSummary"></div>
           <div class="table-wrap">
@@ -363,6 +369,84 @@
       </main>
     </div>
     <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+    <dialog class="modal" id="manualModal" aria-labelledby="manualModalTitle">
+      <form class="modal-panel" id="manualForm">
+        <div class="modal-header">
+          <div>
+            <p class="section-kicker">Direct Entry</p>
+            <h2 id="manualModalTitle">부동산에서 받은 매물 직접 등록</h2>
+            <p class="checklist-subtitle">등록하면 매물장에 추가되고, 주소 기반 체크리스트 자동 검증을 쓸 수 있습니다.</p>
+          </div>
+          <button type="button" class="button secondary compact" id="manualModalClose">닫기</button>
+        </div>
+        <div class="modal-form-grid">
+          <label>
+            매물명 *
+            <input id="manualTitle" type="text" placeholder="예: ○○공인 소개 — 목동 5층 빌딩" />
+          </label>
+          <label>
+            지번 주소 * (자동 검증에 사용)
+            <input id="manualLocation" type="text" placeholder="서울 양천구 목동 917-9" />
+          </label>
+          <label>
+            매매가(원)
+            <input id="manualPrice" type="text" inputmode="numeric" data-money />
+            <span class="money-hint" data-money-hint="manualPrice"></span>
+          </label>
+          <label>
+            유형
+            <select id="manualType">
+              <option value="building">건물</option>
+              <option value="land">토지</option>
+            </select>
+          </label>
+          <label>
+            대지면적(㎡)
+            <input id="manualLandArea" type="number" min="0" step="0.1" />
+          </label>
+          <label>
+            연면적(㎡)
+            <input id="manualBuildingArea" type="number" min="0" step="0.1" />
+          </label>
+          <label>
+            층수
+            <input id="manualFloors" type="number" min="0" step="1" />
+          </label>
+          <label>
+            주차 대수
+            <input id="manualParking" type="number" min="0" step="1" />
+          </label>
+        </div>
+        <label class="manual-files-label">
+          받은 서류 첨부 — PDF·사진 등 여러 개 가능, 개당 최대 15MB
+          <input id="manualFiles" type="file" multiple />
+        </label>
+        <label>
+          메모 (부동산 연락처·특이사항)
+          <input id="manualMemo" type="text" placeholder="○○공인 02-1234-5678, 매도인 급매 사유 확인 필요" />
+        </label>
+        <div class="modal-actions">
+          <button type="submit" class="button primary">매물장에 등록</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog class="modal" id="docsModal" aria-labelledby="docsModalTitle">
+      <div class="modal-panel">
+        <div class="modal-header">
+          <div>
+            <p class="section-kicker">Documents</p>
+            <h2 id="docsModalTitle">받은 서류</h2>
+            <p class="checklist-subtitle" id="docsSubtitle"></p>
+          </div>
+          <button type="button" class="button secondary compact" id="docsModalClose">닫기</button>
+        </div>
+        <div class="docs-list" id="docsList"></div>
+        <label class="manual-files-label">
+          서류 추가
+          <input id="docsAddFiles" type="file" multiple />
+        </label>
+      </div>
+    </dialog>
     <dialog class="modal checklist-modal" id="checklistModal" aria-labelledby="checklistModalTitle">
       <div class="modal-panel checklist-panel">
         <div class="modal-header">
@@ -408,6 +492,6 @@
         <div class="checklist-sections" id="checklistSections"></div>
       </div>
     </dialog>
-    <script type="module" src="app.js?v=20260612o"></script>
+    <script type="module" src="app.js?v=20260612p"></script>
   </body>
 </html>

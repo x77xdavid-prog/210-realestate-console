@@ -137,6 +137,11 @@ const elements = {
   verifyStage: document.querySelector("#verifyStage"),
   verifySteps: document.querySelector("#verifySteps"),
   verifyStamps: document.querySelector("#verifyStamps"),
+  manualModal: document.querySelector("#manualModal"),
+  manualForm: document.querySelector("#manualForm"),
+  docsModal: document.querySelector("#docsModal"),
+  docsList: document.querySelector("#docsList"),
+  docsSubtitle: document.querySelector("#docsSubtitle"),
 };
 
 const state = {
@@ -156,6 +161,8 @@ const state = {
     view: "items",
     reportEntrance: false,
   },
+  documentCounts: new Map(),
+  docsIdentity: null,
 };
 
 const defaultFinanceValues = {
@@ -967,8 +974,12 @@ function renderLedger() {
           <td>
             <div class="ledger-review-cell">
               ${gradeBadgeHtml(entry.identity)}
-              <button type="button" class="button secondary compact" data-checklist-open
-                data-identity="${escapeHtml(entry.identity)}">체크리스트</button>
+              <div class="ledger-row-actions">
+                <button type="button" class="button secondary compact" data-checklist-open
+                  data-identity="${escapeHtml(entry.identity)}">체크리스트</button>
+                <button type="button" class="button secondary compact" data-docs-open
+                  data-identity="${escapeHtml(entry.identity)}" title="받은 서류 보기/추가">📄 ${documentCountFor(entry.identity)}</button>
+              </div>
             </div>
           </td>
           <td>
@@ -1016,6 +1027,11 @@ function renderLedger() {
   elements.ledgerRows.querySelectorAll("[data-checklist-open]").forEach((button) => {
     button.addEventListener("click", () => {
       void openChecklistModal(button.dataset.identity);
+    });
+  });
+  elements.ledgerRows.querySelectorAll("[data-docs-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void openDocsModal(button.dataset.identity);
     });
   });
 }
@@ -1128,6 +1144,178 @@ function elevatorLabel(value) {
   if (value === "required") return "필수";
   if (value === "any") return "무관";
   return "있으면 우선";
+}
+
+/* ===== 부동산 서류 · 직접 등록 ===== */
+
+function safeIdentityKey(identity) {
+  // 서버의 documents 폴더명 규칙과 동일 (콜론 등을 _로 치환)
+  return String(identity).replace(/[^0-9A-Za-z._-]/g, "_");
+}
+
+function documentCountFor(identity) {
+  return state.documentCounts.get(safeIdentityKey(identity)) || 0;
+}
+
+async function loadDocumentCounts() {
+  if (!state.hasServer) return;
+  try {
+    const payload = await apiJson("/api/documents/counts");
+    state.documentCounts = new Map(Object.entries(payload.counts || {}));
+  } catch {
+    // 서류 수 표시는 부가 기능 — 실패해도 대시보드는 동작
+  }
+}
+
+async function uploadDocument(identity, file) {
+  const url = `/api/documents/upload?identity=${encodeURIComponent(identity)}&name=${encodeURIComponent(file.name)}`;
+  const response = await fetch(url, { method: "POST", body: file, cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`업로드 실패: ${response.status}`);
+  }
+  return response.json();
+}
+
+function formatFileSize(bytes) {
+  if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)}MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))}KB`;
+}
+
+function manualNumberOrNull(id) {
+  const raw = document.querySelector(`#${id}`).value.trim();
+  if (raw === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+async function submitManualListing(event) {
+  event.preventDefault();
+  if (!state.hasServer) {
+    showToast("직접 등록은 serve-web 실행 시에만 동작합니다");
+    return;
+  }
+  const title = document.querySelector("#manualTitle").value.trim();
+  const location = document.querySelector("#manualLocation").value.trim();
+  if (!title || !location) {
+    showToast("매물명과 지번 주소는 필수입니다");
+    return;
+  }
+  const externalId = `d${Date.now()}`;
+  const identity = `direct:${externalId}`;
+  const listing = {
+    source: "direct",
+    external_id: externalId,
+    title,
+    location,
+    deposit: numberValue("manualPrice"),
+    monthly_rent: 0,
+    area_m2: manualNumberOrNull("manualBuildingArea") ?? 0,
+    floor: null,
+    premium: 0,
+    url: "",
+    property_type: document.querySelector("#manualType").value,
+    land_area_m2: manualNumberOrNull("manualLandArea"),
+    building_area_m2: manualNumberOrNull("manualBuildingArea"),
+    floors_total: manualNumberOrNull("manualFloors"),
+    parking_spaces: manualNumberOrNull("manualParking"),
+  };
+  const memo = document.querySelector("#manualMemo").value.trim();
+  const saved = await saveLedgerEntry(identity, listing, LEDGER_STATUSES[0], memo);
+  if (!saved) return;
+
+  const files = [...document.querySelector("#manualFiles").files];
+  let uploadedCount = 0;
+  for (const file of files) {
+    try {
+      await uploadDocument(identity, file);
+      uploadedCount += 1;
+    } catch {
+      showToast(`"${file.name}" 업로드에 실패했습니다`);
+    }
+  }
+  await loadDocumentCounts();
+  elements.manualForm.reset();
+  refreshMoneyInputs();
+  elements.manualModal.close();
+  renderLedger();
+  showToast(
+    files.length > 0
+      ? `매물장에 등록했습니다 · 서류 ${uploadedCount}/${files.length}건 첨부`
+      : "매물장에 등록했습니다",
+  );
+  document.querySelector("#ledger").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function openDocsModal(identity) {
+  state.docsIdentity = identity;
+  const entry = state.ledger.get(identity);
+  elements.docsSubtitle.textContent = entry?.listing?.title ?? identity;
+  await renderDocsList();
+  elements.docsModal.showModal();
+}
+
+async function renderDocsList() {
+  const identity = state.docsIdentity;
+  if (!identity) return;
+  try {
+    const payload = await apiJson(`/api/documents?identity=${encodeURIComponent(identity)}`);
+    const docs = payload.documents || [];
+    elements.docsList.innerHTML = docs.length
+      ? docs
+          .map(
+            (doc) => `
+              <div class="doc-row">
+                <a href="/api/documents/file?identity=${encodeURIComponent(identity)}&name=${encodeURIComponent(doc.name)}"
+                  target="_blank" rel="noreferrer" title="새 탭에서 열기">📄 ${escapeHtml(doc.name)}</a>
+                <span class="doc-size">${formatFileSize(doc.size)}</span>
+                <button type="button" class="button ghost-danger compact" data-doc-delete="${escapeHtml(doc.name)}">삭제</button>
+              </div>
+            `,
+          )
+          .join("")
+      : `<div class="empty-state">첨부된 서류가 없습니다. 아래에서 파일을 추가하세요.</div>`;
+    elements.docsList.querySelectorAll("[data-doc-delete]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        try {
+          await apiJson("/api/documents/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ identity, name: button.dataset.docDelete }),
+          });
+          await loadDocumentCounts();
+          renderLedger();
+          await renderDocsList();
+          showToast("서류를 삭제했습니다");
+        } catch {
+          showToast("서류 삭제에 실패했습니다");
+        }
+      });
+    });
+  } catch {
+    elements.docsList.innerHTML = `<div class="empty-state">서류 목록을 불러오지 못했습니다.</div>`;
+  }
+}
+
+async function addDocsFromInput(input) {
+  const identity = state.docsIdentity;
+  const files = [...input.files];
+  if (!identity || files.length === 0) return;
+  let uploaded = 0;
+  for (const file of files) {
+    try {
+      await uploadDocument(identity, file);
+      uploaded += 1;
+    } catch {
+      showToast(`"${file.name}" 업로드에 실패했습니다`);
+    }
+  }
+  input.value = "";
+  await loadDocumentCounts();
+  renderLedger();
+  await renderDocsList();
+  if (uploaded > 0) {
+    showToast(`서류 ${uploaded}건을 추가했습니다`);
+  }
 }
 
 /* ===== 체크리스트 검토 ===== */
@@ -2341,6 +2529,21 @@ document.querySelector("#viewReportTab").addEventListener("click", () => {
 document.querySelector("#viewItemsTab").addEventListener("click", () => {
   setChecklistView("items");
 });
+document.querySelector("#manualAddButton").addEventListener("click", () => {
+  elements.manualModal.showModal();
+});
+document.querySelector("#manualModalClose").addEventListener("click", () => {
+  elements.manualModal.close();
+});
+elements.manualForm.addEventListener("submit", (event) => {
+  void submitManualListing(event);
+});
+document.querySelector("#docsModalClose").addEventListener("click", () => {
+  elements.docsModal.close();
+});
+document.querySelector("#docsAddFiles").addEventListener("change", (event) => {
+  void addDocsFromInput(event.target);
+});
 
 document.querySelector("#mapSearchForm").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -2407,6 +2610,7 @@ try {
   await loadFavorites();
   await loadLedger();
   await loadChecklistData();
+  await loadDocumentCounts();
 } catch {
   elements.scanStatus.textContent = "초기 로드 실패";
   elements.scanStatus.className = "status-pill risk";

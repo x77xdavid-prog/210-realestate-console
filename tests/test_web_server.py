@@ -366,6 +366,78 @@ class DashboardAuthTests(unittest.TestCase):
         self.assertIn("entries", response)
 
 
+class DocumentApiTests(unittest.TestCase):
+    def test_upload_list_download_and_ledger_cascade(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                _request_json(server, "POST", "/api/ledger", {
+                    "identity": "direct:1", "listing": {"title": "부동산 소개 매물"},
+                })
+                uploaded = _request_json(
+                    server, "POST",
+                    "/api/documents/upload?identity=direct%3A1&name=%EB%93%B1%EA%B8%B0%EB%B6%80.pdf",
+                    raw_body=b"%PDF-1.4 fake-doc",
+                )
+                listed = _request_json(server, "GET", "/api/documents?identity=direct%3A1")
+                status, headers, body = _request_raw(
+                    server, "GET",
+                    "/api/documents/file?identity=direct%3A1&name=%EB%93%B1%EA%B8%B0%EB%B6%80.pdf",
+                )
+                counts = _request_json(server, "GET", "/api/documents/counts")
+                # 매물장 삭제 시 서류도 함께 삭제
+                _request_json(server, "POST", "/api/ledger/delete", {"identity": "direct:1"})
+                emptied = _request_json(server, "GET", "/api/documents?identity=direct%3A1")
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertEqual(uploaded["documents"][0]["name"], "등기부.pdf")
+        self.assertEqual(len(listed["documents"]), 1)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("Content-Type"), "application/pdf")
+        self.assertTrue(body.startswith(b"%PDF"))
+        self.assertEqual(counts["counts"].get("direct_1"), 1)
+        self.assertEqual(emptied["documents"], [])
+
+    def test_upload_rejects_traversal_and_oversize(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                with self.assertRaises(AssertionError):
+                    _request_json(
+                        server, "POST",
+                        "/api/documents/upload?identity=a%3A1&name=..",
+                        raw_body=b"data",
+                    )
+                with self.assertRaises(AssertionError):
+                    _request_json(
+                        server, "POST",
+                        "/api/documents/upload?identity=a%3A1&name=ok.pdf",
+                        raw_body=b"",
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+
+def _request_raw(
+    server: ThreadingHTTPServer, method: str, path: str
+) -> tuple[int, dict, bytes]:
+    connection = http.client.HTTPConnection(server.server_address[0], server.server_address[1], timeout=5)
+    try:
+        connection.request(method, path)
+        response = connection.getresponse()
+        body = response.read()
+        return response.status, dict(response.getheaders()), body
+    finally:
+        connection.close()
+
+
 def _basic_auth(user: str, password: str) -> dict[str, str]:
     token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
     return {"Authorization": f"Basic {token}"}
@@ -441,6 +513,7 @@ def _request_json(
     path: str,
     payload: dict | None = None,
     headers: dict[str, str] | None = None,
+    raw_body: bytes | None = None,
 ) -> dict:
     connection = http.client.HTTPConnection(server.server_address[0], server.server_address[1], timeout=5)
     try:
@@ -449,6 +522,9 @@ def _request_json(
         if payload is not None:
             body_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json; charset=utf-8"
+        elif raw_body is not None:
+            body_bytes = raw_body
+            headers["Content-Type"] = "application/octet-stream"
         connection.request(method, path, body=body_bytes, headers=headers)
         response = connection.getresponse()
         body = response.read().decode("utf-8")

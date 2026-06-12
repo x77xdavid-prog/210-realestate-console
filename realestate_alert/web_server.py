@@ -7,7 +7,7 @@ import os
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 from realestate_alert.checklist import (
     ITEM_IDS,
@@ -18,6 +18,16 @@ from realestate_alert.checklist import (
     evaluate_auto_items,
 )
 from realestate_alert.config import load_config
+from realestate_alert.documents import (
+    MAX_DOCUMENT_BYTES,
+    content_disposition_for,
+    count_all_documents,
+    delete_all_documents,
+    delete_document,
+    document_path,
+    list_documents,
+    save_document,
+)
 from realestate_alert.land_info import geocode_parcel
 from realestate_alert.medical_nearby import fetch_medical_nearby, medical_to_dict
 from realestate_alert.models import Listing
@@ -72,6 +82,51 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                         "statuses": LEDGER_STATUSES,
                     }
                 )
+                return
+            if self.path == "/api/documents/counts":
+                database_path = load_config(config_path).database_path
+                self._send_json({"counts": count_all_documents(database_path)})
+                return
+            if self.path.startswith("/api/documents/file"):
+                query = parse_qs(urlparse(self.path).query)
+                identity = (query.get("identity") or [""])[0].strip()
+                name = (query.get("name") or [""])[0].strip()
+                if not identity or not name:
+                    self._send_json({"error": "identity와 name이 필요합니다."}, status=400)
+                    return
+                try:
+                    target = document_path(load_config(config_path).database_path, identity, name)
+                except ValueError as error:
+                    self._send_json({"error": str(error)}, status=400)
+                    return
+                if target is None:
+                    self._send_json({"error": "서류를 찾을 수 없습니다."}, status=404)
+                    return
+                content = target.read_bytes()
+                mime, disposition = content_disposition_for(target.name)
+                self.send_response(200)
+                self.send_header("Content-Type", mime)
+                self.send_header(
+                    "Content-Disposition",
+                    f"{disposition}; filename*=UTF-8''{quote(target.name)}",
+                )
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Content-Length", str(len(content)))
+                self.end_headers()
+                self.wfile.write(content)
+                return
+            if self.path.startswith("/api/documents"):
+                query = parse_qs(urlparse(self.path).query)
+                identity = (query.get("identity") or [""])[0].strip()
+                if not identity:
+                    self._send_json({"error": "identity가 필요합니다."}, status=400)
+                    return
+                try:
+                    documents = list_documents(load_config(config_path).database_path, identity)
+                except ValueError as error:
+                    self._send_json({"error": str(error)}, status=400)
+                    return
+                self._send_json({"identity": identity, "documents": documents})
                 return
             if self.path == "/api/checklist/definition":
                 self._send_json(definition_payload())
@@ -156,7 +211,64 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                     self._send_json({"error": "identity가 필요합니다."}, status=400)
                     return
                 deleted = _store(config_path).delete_ledger_entry(identity)
+                try:
+                    # 매물장에서 빠지면 받은 서류도 함께 정리한다
+                    delete_all_documents(load_config(config_path).database_path, identity)
+                except ValueError:
+                    pass  # 식별자가 폴더명으로 변환 불가한 경우 — 보관된 서류도 없음
                 self._send_json({"identity": identity, "deleted": deleted})
+                return
+            if self.path.startswith("/api/documents/upload"):
+                query = parse_qs(urlparse(self.path).query)
+                identity = (query.get("identity") or [""])[0].strip()
+                name = (query.get("name") or [""])[0].strip()
+                if not identity or not name:
+                    self._send_json({"error": "identity와 name이 필요합니다."}, status=400)
+                    return
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    length = 0
+                if length <= 0:
+                    self._send_json({"error": "빈 파일은 업로드할 수 없습니다."}, status=400)
+                    return
+                if length > MAX_DOCUMENT_BYTES:
+                    self._send_json(
+                        {"error": f"파일이 {MAX_DOCUMENT_BYTES // (1024 * 1024)}MB 제한을 초과합니다."},
+                        status=413,
+                    )
+                    return
+                content = self.rfile.read(length)
+                database_path = load_config(config_path).database_path
+                try:
+                    save_document(database_path, identity, name, content)
+                except ValueError as error:
+                    self._send_json({"error": str(error)}, status=400)
+                    return
+                self._send_json(
+                    {"identity": identity, "documents": list_documents(database_path, identity)}
+                )
+                return
+            if self.path == "/api/documents/delete":
+                body = self._read_json_body()
+                identity = str(body.get("identity", "")).strip()
+                name = str(body.get("name", "")).strip()
+                if not identity or not name:
+                    self._send_json({"error": "identity와 name이 필요합니다."}, status=400)
+                    return
+                database_path = load_config(config_path).database_path
+                try:
+                    removed = delete_document(database_path, identity, name)
+                except ValueError as error:
+                    self._send_json({"error": str(error)}, status=400)
+                    return
+                self._send_json(
+                    {
+                        "identity": identity,
+                        "deleted": removed,
+                        "documents": list_documents(database_path, identity),
+                    }
+                )
                 return
             if self.path == "/api/checklist/evaluate":
                 body = self._read_json_body()
