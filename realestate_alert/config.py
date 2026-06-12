@@ -13,6 +13,8 @@ class SourceConfig:
     path: Path | None = None
     sido: str | None = None
     sigungu: str | None = None
+    court: str | None = None
+    districts: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -61,6 +63,8 @@ def load_config(path: Path) -> AppConfig:
                 path=_optional_resolved_path(base_dir, item.get("path")),
                 sido=item.get("sido"),
                 sigungu=item.get("sigungu"),
+                court=item.get("court"),
+                districts=tuple(item.get("districts", [])),
             )
             for item in sources_data
         ],

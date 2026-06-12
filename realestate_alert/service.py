@@ -6,6 +6,8 @@ from realestate_alert.config import AppConfig, NotifierConfig, SourceConfig
 from realestate_alert.filtering import matches_listing
 from realestate_alert.models import Listing
 from realestate_alert.notifiers import ConsoleNotifier, GmailNotifier, MemoryNotifier, Notifier
+from realestate_alert.court_auction import CourtAuctionSource
+from realestate_alert.lh_supply import LhNoticeSource
 from realestate_alert.onbid import OnbidSource
 from realestate_alert.sources import JsonFileSource, ListingSource
 from realestate_alert.store import ListingStore
@@ -69,6 +71,15 @@ def _build_source(config: SourceConfig) -> ListingSource:
             sido=config.sido or "서울특별시",
             sigungu=config.sigungu or "양천구",
         )
+    if config.type == "lh":
+        return LhNoticeSource(sido=config.sido or "서울특별시")
+    if config.type == "court":
+        kwargs: dict = {}
+        if config.court:
+            kwargs["court_name"] = config.court
+        if config.districts:
+            kwargs["target_districts"] = config.districts
+        return CourtAuctionSource(**kwargs)
     raise ValueError(f"Unsupported source type: {config.type}")
 
 

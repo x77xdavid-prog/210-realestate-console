@@ -18,6 +18,30 @@
       "type": "onbid",
       "sido": "서울특별시",
       "sigungu": "양천구"
+    },
+    {
+      "type": "onbid",
+      "sido": "서울특별시",
+      "sigungu": "강서구"
+    },
+    {
+      "type": "onbid",
+      "sido": "서울특별시",
+      "sigungu": "구로구"
+    },
+    {
+      "type": "onbid",
+      "sido": "서울특별시",
+      "sigungu": "영등포구"
+    },
+    {
+      "type": "court",
+      "court": "서울남부지방법원",
+      "districts": ["양천구", "강서구", "구로구", "영등포구"]
+    },
+    {
+      "type": "lh",
+      "sido": "서울특별시"
     }
   ],
   "notifiers": [
