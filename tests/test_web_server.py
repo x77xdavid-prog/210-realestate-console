@@ -242,6 +242,47 @@ class ChecklistApiTests(unittest.TestCase):
         self.assertEqual(previewed["review"]["profile"], "building")
         self.assertIsNone(missing["review"])
 
+    def test_manual_bulk_check(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                bulk = _request_json(
+                    server, "POST", "/api/checklist/manual-bulk",
+                    {
+                        "identity": "a:1",
+                        "status": "pass",
+                        "item_ids": ["loc_overall", "loc_transit", "budget_total"],
+                        "profile": "land",
+                    },
+                )
+                reset = _request_json(
+                    server, "POST", "/api/checklist/manual-bulk",
+                    {
+                        "identity": "a:1",
+                        "status": "unchecked",
+                        "item_ids": ["loc_overall"],
+                    },
+                )
+                with self.assertRaises(AssertionError):
+                    _request_json(
+                        server, "POST", "/api/checklist/manual-bulk",
+                        {"identity": "a:1", "status": "maybe", "item_ids": ["loc_overall"]},
+                    )
+                with self.assertRaises(AssertionError):
+                    _request_json(
+                        server, "POST", "/api/checklist/manual-bulk",
+                        {"identity": "a:1", "status": "pass", "item_ids": ["nope"]},
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertEqual(bulk["review"]["progress"]["manual_done"], 3)
+        self.assertEqual(bulk["updated"], 3)
+        self.assertEqual(reset["review"]["progress"]["manual_done"], 2)
+
     def test_manual_rejects_bad_status_and_item(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

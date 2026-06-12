@@ -1218,6 +1218,7 @@ const VERIFY_STEPS = [
   "건축물대장 조회",
   "토지이용계획 · 공시지가 조회",
   "주변 실거래가 분석",
+  "주변 정형외과 · 약국 조회",
   "체크리스트 판정 작성",
 ];
 
@@ -1514,9 +1515,20 @@ function renderChecklistModal(animateGrade) {
     if (!byCategory.has(item.category)) byCategory.set(item.category, []);
     byCategory.get(item.category).push(item);
   });
+  const manualItems = items.filter((item) => item.kind !== "auto");
+  const remaining = manualItems.filter((item) => item.status === "unchecked").length;
+  const bulkBar = `
+    <div class="bulk-bar">
+      <span class="bulk-info">수동 항목 ${manualItems.length}건 · 미체크 ${remaining}건</span>
+      <div class="bulk-actions">
+        <button type="button" class="button primary compact" data-bulk-evaluate>자동 검증 실행</button>
+        <button type="button" class="button ghost-danger compact" data-bulk="reset">체크 초기화</button>
+      </div>
+    </div>
+  `;
   const order = state.checklist.definition?.categories ?? CHECKLIST_CATEGORIES;
   const scrollPos = elements.checklistSections.scrollTop;
-  elements.checklistSections.innerHTML = order
+  elements.checklistSections.innerHTML = bulkBar + order
     .filter((category) => byCategory.has(category))
     .map(
       (category, index) => `
@@ -1574,7 +1586,56 @@ function checklistItemHtml(item) {
   `;
 }
 
+async function bulkManualCheck(mode) {
+  if (!state.hasServer) {
+    showToast("체크리스트 저장은 serve-web 실행 시에만 동작합니다");
+    return;
+  }
+  const identity = state.checklist.currentIdentity;
+  if (!identity) return;
+  const manualItems = checklistItemsForRender().filter((item) => item.kind !== "auto");
+  const status = mode === "reset" ? "unchecked" : mode;
+  const targets = mode === "reset"
+    ? manualItems.filter((item) => item.status !== "unchecked")
+    : manualItems.filter((item) => item.status === "unchecked");
+  if (targets.length === 0) {
+    showToast(mode === "reset" ? "초기화할 체크가 없습니다" : "남은 미체크 항목이 없습니다");
+    return;
+  }
+  try {
+    const payload = await apiJson("/api/checklist/manual-bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        identity,
+        status,
+        item_ids: targets.map((item) => item.item_id),
+        profile: elements.checklistProfile.value,
+      }),
+    });
+    const previousGrade = state.checklist.current?.grade;
+    state.checklist.current = payload.review;
+    await refreshChecklistSummaries();
+    renderLedger();
+    renderChecklistModal(previousGrade !== payload.review.grade);
+    const labels = { pass: "적합", na: "해당없음", reset: "미체크로 초기화" };
+    showToast(`${payload.updated}건을 ${labels[mode]} 처리했습니다`);
+  } catch {
+    showToast("일괄 체크에 실패했습니다");
+  }
+}
+
 function wireChecklistInputs() {
+  elements.checklistSections.querySelectorAll("[data-bulk]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void bulkManualCheck(button.dataset.bulk);
+    });
+  });
+  elements.checklistSections.querySelectorAll("[data-bulk-evaluate]").forEach((button) => {
+    button.addEventListener("click", () => {
+      void runChecklistEvaluate();
+    });
+  });
   elements.checklistSections.querySelectorAll("[data-check-item]").forEach((button) => {
     button.addEventListener("click", () => {
       const itemId = button.dataset.checkItem;

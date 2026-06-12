@@ -1570,6 +1570,30 @@ details.fit-group[open] > summary::before {
   perspective: 1000px;
 }
 
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  background: rgba(14, 116, 144, 0.05);
+  border: 1px dashed rgba(14, 116, 144, 0.3);
+}
+
+.bulk-info {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.bulk-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .checklist-section {
   padding: 16px;
   border-radius: var(--radius-md);

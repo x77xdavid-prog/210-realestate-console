@@ -131,6 +131,35 @@ class EvaluateAutoItemsTests(unittest.TestCase):
         self.assertEqual(result["status"], "info")
         self.assertIn("제2종근린생활시설", result["evidence"])
 
+    def test_competition_and_pharmacy_unknown_without_medical_data(self):
+        results = evaluate_auto_items({}, {})
+        self.assertEqual(results["loc_competition"]["status"], "unknown")
+        self.assertEqual(results["loc_pharmacy"]["status"], "unknown")
+        self.assertIn("활용신청", results["loc_competition"]["evidence"])
+
+    def test_competition_pass_when_few_clinics(self):
+        report = {"medical": {"ortho_clinic_count": 2, "ortho_clinic_names": ["a정형외과", "b정형외과"], "pharmacy_count": 3}}
+        result = evaluate_auto_items({}, report)["loc_competition"]
+        self.assertEqual(result["status"], "pass")
+        self.assertIn("2곳", result["evidence"])
+
+    def test_competition_warns_when_crowded(self):
+        report = {"medical": {"ortho_clinic_count": 5, "ortho_clinic_names": ["a", "b", "c", "d", "e"], "pharmacy_count": 3}}
+        result = evaluate_auto_items({}, report)["loc_competition"]
+        self.assertEqual(result["status"], "warn")
+        self.assertIn("경쟁 밀집", result["evidence"])
+
+    def test_pharmacy_pass_and_warn(self):
+        with_pharmacy = {"medical": {"ortho_clinic_count": 0, "ortho_clinic_names": [], "pharmacy_count": 4}}
+        without_pharmacy = {"medical": {"ortho_clinic_count": 0, "ortho_clinic_names": [], "pharmacy_count": 0}}
+        self.assertEqual(evaluate_auto_items({}, with_pharmacy)["loc_pharmacy"]["status"], "pass")
+        self.assertEqual(evaluate_auto_items({}, without_pharmacy)["loc_pharmacy"]["status"], "warn")
+
+    def test_competition_and_pharmacy_are_auto_items(self):
+        kinds = {item.item_id: item.kind for item in CHECKLIST_ITEMS}
+        self.assertEqual(kinds["loc_competition"], "auto")
+        self.assertEqual(kinds["loc_pharmacy"], "auto")
+
 
 class ComputeReviewTests(unittest.TestCase):
     def test_critical_fail_forces_no_go(self):

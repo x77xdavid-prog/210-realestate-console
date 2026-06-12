@@ -16,6 +16,7 @@ from realestate_alert.checklist import (
 )
 from realestate_alert.config import load_config
 from realestate_alert.land_info import geocode_parcel
+from realestate_alert.medical_nearby import fetch_medical_nearby, medical_to_dict
 from realestate_alert.models import Listing
 from realestate_alert.naver import naver_land_coord_url, naver_land_url, naver_map_url
 from realestate_alert.public_data import PublicDataError
@@ -160,6 +161,7 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                     self._send_json({"error": "listing.location(주소)이 필요합니다."}, status=400)
                     return
                 report = verify_address(address)
+                _attach_medical_data(report)
                 auto = evaluate_auto_items(listing, report)
                 store = _store(config_path)
                 stored = store.get_checklist_review(identity) or {}
@@ -176,6 +178,47 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                         "review": compute_review(profile, auto, review["manual"]),
                         "errors": report.get("errors", {}),
                         "evaluated_at": review["evaluated_at"],
+                    }
+                )
+                return
+            if self.path == "/api/checklist/manual-bulk":
+                body = self._read_json_body()
+                identity = str(body.get("identity", "")).strip()
+                status = str(body.get("status", "")).strip()
+                item_ids = body.get("item_ids")
+                if not identity or not isinstance(item_ids, list) or not item_ids:
+                    self._send_json({"error": "identity와 item_ids(목록)가 필요합니다."}, status=400)
+                    return
+                if status not in MANUAL_STATUSES:
+                    self._send_json({"error": f"지원하지 않는 체크 상태: {status}"}, status=400)
+                    return
+                unknown_ids = [item for item in item_ids if item not in ITEM_IDS]
+                if unknown_ids:
+                    self._send_json({"error": f"알 수 없는 체크 항목: {', '.join(map(str, unknown_ids))}"}, status=400)
+                    return
+                store = _store(config_path)
+                stored = store.get_checklist_review(identity) or {
+                    "profile": "building",
+                    "auto": {},
+                    "manual": {},
+                }
+                requested_profile = body.get("profile")
+                if isinstance(requested_profile, str) and requested_profile in PROFILES:
+                    stored["profile"] = requested_profile
+                manual = dict(stored.get("manual", {}))
+                for item_id in item_ids:
+                    existing = manual.get(item_id, {})
+                    # 일괄 처리 시에도 기존 메모는 보존한다
+                    manual[item_id] = {"status": status, "memo": existing.get("memo", "")}
+                stored["manual"] = manual
+                store.save_checklist_review(identity, stored)
+                self._send_json(
+                    {
+                        "identity": identity,
+                        "updated": len(item_ids),
+                        "review": compute_review(
+                            stored["profile"], stored.get("auto"), manual
+                        ),
                     }
                 )
                 return
@@ -269,6 +312,18 @@ def _utc_now_iso() -> str:
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _attach_medical_data(report: dict[str, Any]) -> None:
+    """검증 리포트에 같은 동의 정형외과 의원·약국 현황을 덧붙인다 (실패 시 errors에 기록)."""
+    parcel = report.get("parcel") or {}
+    dong = str(parcel.get("dong") or "").strip()
+    if not dong:
+        return
+    try:
+        report["medical"] = medical_to_dict(fetch_medical_nearby(dong))
+    except PublicDataError as error:
+        report.setdefault("errors", {})["medical"] = str(error)
 
 
 def _review_summaries(config_path: Path) -> dict[str, Any]:

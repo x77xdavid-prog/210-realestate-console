@@ -58,8 +58,8 @@ CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
     ),
     ChecklistItem(
         "loc_competition", "입지", "경쟁 의원 분석",
-        "반경 1km 내 정형외과·재활의학과·통증의학과 수와 규모.",
-        "manual", _ALL,
+        "같은 법정동의 정형외과 의원 수 (심평원 병원정보 자동 조회) — 인접 동 경쟁은 별도 확인.",
+        "auto", _ALL,
     ),
     ChecklistItem(
         "loc_transit", "입지", "대중교통 접근성",
@@ -73,8 +73,8 @@ CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
     ),
     ChecklistItem(
         "loc_pharmacy", "입지", "약국 연계",
-        "인근 약국 유무 또는 약국 유치 가능 공간.",
-        "manual", _ALL, weight=0.5,
+        "같은 법정동의 약국 수 (심평원 약국정보 자동 조회) — 없으면 유치 공간 검토.",
+        "auto", _ALL, weight=0.5,
     ),
     # --- 법규 ---
     ChecklistItem(
@@ -273,6 +273,7 @@ def evaluate_auto_items(
     building = report.get("building") or {}
     land = report.get("land") or {}
     market = report.get("market") or {}
+    medical = report.get("medical") or {}
     year = now_year if now_year is not None else datetime.now(timezone.utc).year
     return {
         "zoning": _judge_zoning(land, listing),
@@ -282,6 +283,8 @@ def evaluate_auto_items(
         "rebuild_age_ok": _judge_rebuild_age(building, listing),
         "road_access": _judge_road_access(land, listing),
         "price_market": _judge_price_market(market, building, listing),
+        "loc_competition": _judge_competition(medical),
+        "loc_pharmacy": _judge_pharmacy(medical),
         "current_use": _info_current_use(building),
         "buildable_volume": _info_buildable_volume(building, listing),
         "land_price_basis": _info_land_price(land, building, listing),
@@ -391,6 +394,37 @@ def _judge_price_market(
 
 def _man(value: float) -> str:
     return f"{value / 10000:,.0f}만원"
+
+
+COMPETITION_WARN_COUNT = 3  # 같은 동 정형외과 의원이 이 수 이상이면 경쟁 밀집 경고
+
+
+def _judge_competition(medical: dict[str, Any]) -> dict[str, str]:
+    count = medical.get("ortho_clinic_count")
+    if count is None:
+        return _result(
+            "unknown",
+            "주변 의원 데이터 없음 — data.go.kr에서 '건강보험심사평가원 병원정보서비스' 활용신청 필요",
+        )
+    names = medical.get("ortho_clinic_names") or []
+    sample = ", ".join(names[:5]) + (" 외" if len(names) > 5 else "")
+    if count == 0:
+        return _result("pass", "같은 동에 정형외과 의원 없음 — 경쟁 공백 지역")
+    if count < COMPETITION_WARN_COUNT:
+        return _result("pass", f"같은 동 정형외과 의원 {count}곳: {sample}")
+    return _result("warn", f"같은 동 정형외과 의원 {count}곳 — 경쟁 밀집: {sample}")
+
+
+def _judge_pharmacy(medical: dict[str, Any]) -> dict[str, str]:
+    count = medical.get("pharmacy_count")
+    if count is None:
+        return _result(
+            "unknown",
+            "주변 약국 데이터 없음 — data.go.kr에서 '건강보험심사평가원 약국정보서비스' 활용신청 필요",
+        )
+    if count > 0:
+        return _result("pass", f"같은 동 약국 {count}곳 — 처방 연계 가능")
+    return _result("warn", "같은 동 약국 없음 — 건물 내 약국 유치 공간 확보 검토")
 
 
 def _info_current_use(building: dict[str, Any]) -> dict[str, str]:
