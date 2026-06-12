@@ -159,12 +159,15 @@ const state = {
 };
 
 const defaultFinanceValues = {
-  purchasePrice: "1000000000",
-  loanAmount: "600000000",
-  cashAvailable: "450000000",
+  purchasePrice: "5000000000",
+  cashAvailable: "2000000000",
+  interiorBudget: "500000000",
   taxRate: "0.046",
   brokerageRate: "0.009",
+  interestRate: "4.5",
+  loanYears: "25",
 };
+const LTV_WARN_RATIO = 0.8; // 통상 담보대출 한도(60~80%) 상단
 const defaultAssetCriteria = {
   minLandArea: 200,
   minBuildingArea: 300,
@@ -1976,26 +1979,76 @@ function renderMapInfo(listing) {
 
 function calculateEstimate() {
   const purchasePrice = numberValue("purchasePrice");
-  const loanAmount = numberValue("loanAmount");
   const cashAvailable = numberValue("cashAvailable");
+  const interiorBudget = numberValue("interiorBudget");
   const taxRate = Number(document.querySelector("#taxRate").value || 0);
   const brokerageRate = Number(document.querySelector("#brokerageRate").value || 0);
-  const equity = Math.max(0, purchasePrice - loanAmount);
+  const interestRate = Number(document.querySelector("#interestRate").value || 0);
+  const loanYears = Number(document.querySelector("#loanYears").value || 0);
+
   const acquisitionTax = Math.round(purchasePrice * taxRate);
   const brokerage = Math.round(purchasePrice * brokerageRate);
-  const totalCash = equity + acquisitionTax + brokerage;
-  const gap = Math.max(0, totalCash - cashAvailable);
-  const ratio = purchasePrice > 0 ? equity / purchasePrice : 0;
-  elements.estimateGrid.innerHTML = [
-    ["자기자본", money(equity)],
-    ["자기자본 비율", `${Math.round(ratio * 1000) / 10}%`],
-    ["취득세 추정", money(acquisitionTax)],
-    ["중개보수 추정", money(brokerage)],
-    ["필요 현금", money(totalCash)],
-    ["부족 현금", money(gap)],
-  ]
-    .map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`)
+  const totalCost = purchasePrice + acquisitionTax + brokerage + interiorBudget;
+  // 자기자본을 먼저 쓰고 모자라는 만큼이 필요 대출액
+  const loanNeeded = Math.max(0, totalCost - cashAvailable);
+  const ltv = purchasePrice > 0 ? loanNeeded / purchasePrice : 0;
+  const equityRatio = totalCost > 0 ? Math.min(1, cashAvailable / totalCost) : 0;
+
+  // 원리금균등 월 상환액: P·r(1+r)^n / ((1+r)^n − 1)
+  const monthlyRate = interestRate / 100 / 12;
+  const months = loanYears * 12;
+  let monthlyPayment = 0;
+  if (loanNeeded > 0 && months > 0) {
+    monthlyPayment = monthlyRate > 0
+      ? (loanNeeded * monthlyRate * Math.pow(1 + monthlyRate, months)) / (Math.pow(1 + monthlyRate, months) - 1)
+      : loanNeeded / months;
+  }
+  const totalInterest = monthlyPayment > 0 ? monthlyPayment * months - loanNeeded : 0;
+  const firstMonthInterest = loanNeeded * monthlyRate;
+
+  const pct = (value) => `${Math.round(value * 1000) / 10}%`;
+  const rows = [
+    ["총 취득비용 (매입+세금+중개+인테리어)", money(totalCost), true],
+    ["· 취득세 추정", money(acquisitionTax), false],
+    ["· 중개보수 추정", money(brokerage), false],
+    ["· 인테리어·장비", money(interiorBudget), false],
+    ["필요 대출액", loanNeeded > 0 ? money(loanNeeded) : "0원 — 자기자본으로 충분", true],
+    ["LTV (매입가 대비 대출)", pct(ltv), false],
+    [`월 상환액 (원리금균등 ${loanYears}년 · 연 ${interestRate}%)`, money(Math.round(monthlyPayment)), true],
+    ["첫 달 이자", money(Math.round(firstMonthInterest)), false],
+    ["총 이자 (기간 전체)", money(Math.round(totalInterest)), false],
+    ["자기자본 비율 (총비용 대비)", pct(equityRatio), false],
+  ];
+  elements.estimateGrid.innerHTML = rows
+    .map(([label, value, isKey]) => `<div${isKey ? ' class="key-row"' : ""}><dt>${label}</dt><dd>${value}</dd></div>`)
     .join("");
+
+  const warnings = [];
+  if (loanNeeded === 0) {
+    warnings.push({ tone: "ok", text: "대출 없이 자기자본만으로 매입 가능한 구성입니다." });
+  } else {
+    if (ltv > LTV_WARN_RATIO) {
+      warnings.push({
+        tone: "risk",
+        text: `LTV ${pct(ltv)} — 통상 담보대출 한도(매입가의 60~80%)를 초과할 수 있습니다. 메디컬론 등 신용 보강이나 자기자본 추가를 검토하세요.`,
+      });
+    } else if (ltv > 0.7) {
+      warnings.push({
+        tone: "need",
+        text: `LTV ${pct(ltv)} — 담보 한도 상단에 가깝습니다. 은행 사전 한도 조회를 권합니다.`,
+      });
+    }
+    warnings.push({
+      tone: "neutral",
+      text: `월 상환액 ${money(Math.round(monthlyPayment))}을 병원 월 순이익과 비교해 상환 여력을 확인하세요.`,
+    });
+  }
+  const warningsBox = document.querySelector("#financeWarnings");
+  if (warningsBox) {
+    warningsBox.innerHTML = warnings
+      .map((item) => `<p class="finance-note tone-${item.tone}">${escapeHtml(item.text)}</p>`)
+      .join("");
+  }
 }
 
 /* ===== CSV export ===== */
@@ -2173,10 +2226,12 @@ function setupNavHighlight() {
 
 function resetDashboard() {
   document.querySelector("#purchasePrice").value = defaultFinanceValues.purchasePrice;
-  document.querySelector("#loanAmount").value = defaultFinanceValues.loanAmount;
   document.querySelector("#cashAvailable").value = defaultFinanceValues.cashAvailable;
+  document.querySelector("#interiorBudget").value = defaultFinanceValues.interiorBudget;
   document.querySelector("#taxRate").value = defaultFinanceValues.taxRate;
   document.querySelector("#brokerageRate").value = defaultFinanceValues.brokerageRate;
+  document.querySelector("#interestRate").value = defaultFinanceValues.interestRate;
+  document.querySelector("#loanYears").value = defaultFinanceValues.loanYears;
   refreshMoneyInputs();
   assetCriteria = { ...defaultAssetCriteria };
   persistCriteria();

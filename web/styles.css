@@ -1164,6 +1164,40 @@ td span {
   margin-top: 18px;
 }
 
+.estimate-grid .key-row dt {
+  font-weight: 800;
+  color: var(--navy);
+}
+
+.estimate-grid .key-row dd {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--teal);
+}
+
+.finance-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.finance-note {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.5;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+}
+
+.finance-note.tone-ok { border-color: rgba(15, 157, 88, 0.35); color: var(--green); background: var(--green-soft); }
+.finance-note.tone-need { border-color: rgba(180, 83, 9, 0.35); color: #b45309; background: #fef4e6; }
+.finance-note.tone-risk { border-color: rgba(225, 29, 72, 0.35); color: var(--rose); background: var(--red-soft); }
+.finance-note.tone-neutral { color: var(--ink-soft); }
+
 /* ===== Modal ===== */
 .modal {
   border: none;
