@@ -4,6 +4,7 @@ import base64
 import hmac
 import json
 import os
+import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,7 @@ from realestate_alert.models import Listing
 from realestate_alert.naver import naver_land_coord_url, naver_land_url, naver_map_url
 from realestate_alert.public_data import PublicDataError
 from realestate_alert.registry import RegistryStatus
-from realestate_alert.service import collect_listings, run_once
+from realestate_alert.service import ListingSnapshot, collect_listings, run_once
 from realestate_alert.store import LEDGER_STATUSES, ListingStore
 from realestate_alert.verify import verify_address
 
@@ -43,6 +44,27 @@ MAX_BODY_BYTES = 256 * 1024
 # 설정 시 모든 요청에 브라우저 기본 로그인(아이디 무관, 비밀번호 일치)을 요구한다.
 # 로컬 전용 사용이면 비워 두면 된다 — 클라우드 공개 배포 시 필수.
 DASHBOARD_PASSWORD_ENV = "DASHBOARD_PASSWORD"
+
+# 수집 결과 캐시 — 보드를 열 때마다 6개 소스를 재수집하지 않도록 interval_seconds 동안 재사용.
+# "신규 매물 스캔" 버튼(/api/scan)은 캐시를 무효화하고 즉시 재수집한다.
+_snapshot_cache: dict[str, tuple[float, ListingSnapshot]] = {}
+
+
+def _cached_snapshot(config_path: Path) -> ListingSnapshot:
+    config = load_config(config_path)
+    key = str(config_path)
+    ttl = max(60, config.interval_seconds)
+    cached = _snapshot_cache.get(key)
+    now = time.monotonic()
+    if cached and now - cached[0] < ttl:
+        return cached[1]
+    snapshot = collect_listings(config)
+    _snapshot_cache[key] = (now, snapshot)
+    return snapshot
+
+
+def _invalidate_snapshot(config_path: Path) -> None:
+    _snapshot_cache.pop(str(config_path), None)
 
 
 def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestHandler]:
@@ -158,6 +180,7 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 self._send_unauthorized()
                 return
             if self.path == "/api/scan":
+                _invalidate_snapshot(config_path)
                 result = run_once(load_config(config_path))
                 self._send_json(
                     {
@@ -502,7 +525,7 @@ def _safe_geocode(location: str) -> tuple[float, float] | None:
 
 def _listings_payload(config_path: Path) -> dict[str, Any]:
     config = load_config(config_path)
-    snapshot = collect_listings(config)
+    snapshot = _cached_snapshot(config_path)
     store = ListingStore(config.database_path)
     first_seen = store.first_seen_map()
     favorites = store.favorite_identities()

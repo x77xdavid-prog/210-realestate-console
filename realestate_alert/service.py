@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from realestate_alert.config import AppConfig, NotifierConfig, SourceConfig
@@ -37,10 +38,20 @@ class ListingSnapshot:
 def collect_listings(config: AppConfig) -> ListingSnapshot:
     sources = [_build_source(source_config) for source_config in config.sources]
     fetched: list[Listing] = []
-    for source in sources:
-        fetched.extend(source.fetch())
+    # 소스가 여러 개라 병렬로 수집한다 (한 소스 실패는 건너뛰고 나머지 진행)
+    with ThreadPoolExecutor(max_workers=min(6, max(1, len(sources)))) as pool:
+        for result in pool.map(_safe_fetch, sources):
+            fetched.extend(result)
     matched = [listing for listing in fetched if matches_listing(config.criteria, listing)]
     return ListingSnapshot(fetched=fetched, matched=matched)
+
+
+def _safe_fetch(source: ListingSource) -> list[Listing]:
+    try:
+        return source.fetch()
+    except Exception as error:  # noqa: BLE001 — 외부 소스 하나가 죽어도 전체 수집은 계속
+        print(f"[collect] 소스 수집 실패 ({type(source).__name__}): {error}")
+        return []
 
 
 def run_once(config: AppConfig) -> RunResult:
