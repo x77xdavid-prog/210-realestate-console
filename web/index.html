@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>210정형외과 · 부동산 매물 콘솔</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="서비스 메뉴">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">210</span>
+          <div>
+            <strong>매물 콘솔</strong>
+            <span>210 ORTHOPEDICS</span>
+          </div>
+        </div>
+        <nav class="nav-list" aria-label="대시보드 섹션">
+          <a href="#overview" class="nav-link active">현황</a>
+          <a href="#board" class="nav-link">매물 보드</a>
+          <a href="#ledger" class="nav-link">매물장</a>
+          <a href="#map" class="nav-link">지도</a>
+          <a href="#finance" class="nav-link">매입 계산</a>
+        </nav>
+        <div class="sidebar-note">
+          <span class="note-label">Gmail 알림</span>
+          <p id="mailNote">신규 매물 발견 시 설정된 Gmail 주소로 알림 메일이 발송됩니다. config의 gmail 알림 설정을 확인하세요.</p>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar reveal">
+          <div>
+            <p class="eyebrow">210 Orthopedics · Property Console</p>
+            <h1>병원 건물 매입, <em>좋은 매물</em>을 놓치지 않게</h1>
+          </div>
+          <div class="topbar-actions">
+            <button type="button" class="button secondary" id="resetButton">
+              <span class="icon" aria-hidden="true">↺</span>
+              초기화
+            </button>
+            <button type="button" class="button primary" id="scanButton">
+              <span class="icon" aria-hidden="true">⌕</span>
+              신규 매물 스캔
+            </button>
+          </div>
+        </header>
+
+        <section class="new-banner reveal" id="newBanner" hidden aria-label="신규 매물 알림">
+          <div class="new-banner-glow" aria-hidden="true"></div>
+          <div class="new-banner-body">
+            <span class="new-banner-icon" aria-hidden="true">★</span>
+            <div>
+              <strong id="newBannerTitle">신규 매물 0건</strong>
+              <span id="newBannerSources"></span>
+            </div>
+          </div>
+          <button type="button" class="button primary compact" id="newBannerButton">신규만 보기</button>
+        </section>
+
+        <section class="metrics-grid reveal" id="overview" aria-label="매물 요약">
+          <article class="metric-panel tilt" data-tilt data-metric-link="fetched" role="button" tabindex="0"
+            aria-label="수집 매물 전체 목록 보기">
+            <span class="metric-accent" aria-hidden="true">⌂</span>
+            <span class="metric-label">수집 매물</span>
+            <strong id="fetchedCount" data-count>0</strong>
+            <span class="metric-caption">클릭하면 전체 목록 표시</span>
+          </article>
+          <article class="metric-panel tilt" data-tilt data-metric-link="all" role="button" tabindex="0"
+            aria-label="조건 일치 매물 보기">
+            <span class="metric-accent" aria-hidden="true">✓</span>
+            <span class="metric-label">조건 일치</span>
+            <strong id="matchedCount" data-count>0</strong>
+            <span class="metric-caption">지역, 예산, 면적, 키워드</span>
+          </article>
+          <article class="metric-panel tilt is-new-metric" data-tilt data-metric-link="new" role="button" tabindex="0"
+            aria-label="신규 매물 보기">
+            <span class="metric-accent" aria-hidden="true">★</span>
+            <span class="metric-label">신규 매물</span>
+            <strong id="newCount" data-count>0</strong>
+            <span class="metric-caption">최근 72시간 발견</span>
+          </article>
+          <article class="metric-panel tilt is-fav-metric" data-tilt data-metric-link="favorite" role="button" tabindex="0"
+            aria-label="관심 매물 보기">
+            <span class="metric-accent" aria-hidden="true">♥</span>
+            <span class="metric-label">관심 매물</span>
+            <strong id="favoriteCount" data-count>0</strong>
+            <span class="metric-caption">검토 후보 보관함</span>
+          </article>
+        </section>
+
+        <section class="content-grid reveal">
+          <section class="panel filter-panel" aria-labelledby="filterTitle">
+            <div class="panel-heading">
+              <div>
+                <p class="section-kicker">Acquisition Criteria</p>
+                <h2 id="filterTitle">건물·토지 조건 설정</h2>
+              </div>
+              <button type="button" class="button secondary compact" id="criteriaResetButton">기본값</button>
+            </div>
+            <div class="preset-row" role="group" aria-label="조건 프리셋">
+              <span class="preset-label">프리셋</span>
+              <button type="button" class="button secondary compact" id="presetBuildingButton">
+                기존 건물 (대지 150평 · 연면적 600평)
+              </button>
+              <button type="button" class="button secondary compact" id="presetLandButton">
+                신축용 토지 (대지 150평 · 접도 6m)
+              </button>
+            </div>
+            <form class="filter-form criteria-form" id="criteriaForm">
+              <h3 class="criteria-subhead">건물 매입 필수 조건</h3>
+              <label>
+                최소 대지
+                <span class="area-input-pair">
+                  <span class="area-field">
+                    <span class="area-unit-label">㎡</span>
+                    <input id="minLandAreaInput" type="number" value="200" min="0" step="1" />
+                  </span>
+                  <span class="area-field">
+                    <span class="area-unit-label">평</span>
+                    <input id="minLandAreaPyeongInput" type="number" value="60.5" min="0" step="0.1" />
+                  </span>
+                </span>
+              </label>
+              <label>
+                최소 건평/연면적
+                <span class="area-input-pair">
+                  <span class="area-field">
+                    <span class="area-unit-label">㎡</span>
+                    <input id="minBuildingAreaInput" type="number" value="300" min="0" step="1" />
+                  </span>
+                  <span class="area-field">
+                    <span class="area-unit-label">평</span>
+                    <input id="minBuildingAreaPyeongInput" type="number" value="90.8" min="0" step="0.1" />
+                  </span>
+                </span>
+              </label>
+              <label>
+                최소 층수
+                <input id="minFloorsInput" type="number" value="3" min="0" step="1" />
+              </label>
+              <label>
+                최소 주차 대수
+                <input id="minParkingInput" type="number" value="3" min="0" step="1" />
+              </label>
+              <label>
+                엘리베이터
+                <select id="elevatorInput">
+                  <option value="preferred">있으면 우선</option>
+                  <option value="required">필수</option>
+                  <option value="any">무관</option>
+                </select>
+              </label>
+              <label>
+                승인연도 하한
+                <input id="minApprovalYearInput" type="number" value="2000" min="1900" step="1" />
+              </label>
+              <h3 class="criteria-subhead">토지 신축 가능성 조건</h3>
+              <label>
+                허용 용도지역
+                <input id="zoningInput" type="text" value="준주거지역, 제2종일반주거지역, 일반상업지역" />
+              </label>
+              <label>
+                최소 접도 폭(m)
+                <input id="minRoadWidthInput" type="number" value="6" min="0" step="1" />
+              </label>
+              <label>
+                최대 건폐율(%)
+                <input id="maxCoverageInput" type="number" value="70" min="0" step="1" />
+              </label>
+              <label>
+                최소 용적률(%)
+                <input id="minFarInput" type="number" value="180" min="0" step="1" />
+              </label>
+              <label>
+                필수 확인
+                <input id="landRequiredChecksInput" type="text" value="건축 가능, 주차장 설치, 병원 용도 가능, 도로 접함" />
+              </label>
+            </form>
+            <p class="fine-print">입력 즉시 적용됩니다 — 매물 보드의 ⛳필수조건 그룹과 카드 조건 판정에 바로 반영.</p>
+          </section>
+
+          <section class="panel" aria-labelledby="priorityTitle">
+            <div class="panel-heading">
+              <div>
+                <p class="section-kicker">Priority</p>
+                <h2 id="priorityTitle">검토 우선순위</h2>
+              </div>
+            </div>
+            <div class="priority-list" id="priorityList" role="list"></div>
+          </section>
+        </section>
+
+        <section class="panel criteria-table-panel reveal" aria-labelledby="assetCriteriaTitle">
+          <div class="panel-heading row-heading">
+            <div>
+              <p class="section-kicker">Acquisition Criteria</p>
+              <h2 id="assetCriteriaTitle">건물·토지 매입 조건표</h2>
+            </div>
+            <span class="status-pill neutral">서울 양천구 기준</span>
+          </div>
+          <div class="criteria-table-grid" id="assetCriteriaGrid"></div>
+        </section>
+
+        <section class="panel reveal" id="board" aria-labelledby="boardTitle">
+          <div class="panel-heading row-heading">
+            <div>
+              <p class="section-kicker">Listing Board</p>
+              <h2 id="boardTitle">매물 보드</h2>
+            </div>
+            <span class="status-pill neutral" id="scanStatus">대기 중</span>
+          </div>
+          <div class="board-toolbar" role="tablist" aria-label="매물 필터">
+            <button type="button" class="filter-chip active" data-board-filter="all">
+              조건 일치 <span class="chip-count" id="countAll">0</span>
+            </button>
+            <button type="button" class="filter-chip" data-board-filter="new">
+              ★ 신규 <span class="chip-count" id="countNew">0</span>
+            </button>
+            <button type="button" class="filter-chip" data-board-filter="favorite">
+              ♥ 관심 <span class="chip-count" id="countFavorite">0</span>
+            </button>
+            <button type="button" class="filter-chip" data-board-filter="fit">
+              ⛳ 필수조건 <span class="chip-count" id="countFit">0</span>
+            </button>
+            <button type="button" class="filter-chip" data-board-filter="fetched">
+              수집 전체 <span class="chip-count" id="countFetched">0</span>
+            </button>
+          </div>
+          <div class="board-grid" id="boardGrid"></div>
+        </section>
+
+        <section class="panel reveal" id="ledger" aria-labelledby="ledgerTitle">
+          <div class="panel-heading row-heading">
+            <div>
+              <p class="section-kicker">Property Ledger</p>
+              <h2 id="ledgerTitle">매물장</h2>
+            </div>
+            <button type="button" class="button secondary compact" id="ledgerExportButton">
+              <span class="icon" aria-hidden="true">⇩</span>
+              매물장 CSV
+            </button>
+          </div>
+          <div class="ledger-summary" id="ledgerSummary"></div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>매물</th>
+                  <th>가격</th>
+                  <th>상태</th>
+                  <th>메모</th>
+                  <th>체크리스트 검토</th>
+                  <th>링크</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="ledgerRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel map-panel reveal" id="map" aria-labelledby="mapTitle">
+          <div class="panel-heading row-heading">
+            <div>
+              <p class="section-kicker">Naver Real Estate</p>
+              <h2 id="mapTitle">네이버 부동산 · 지도 검토</h2>
+            </div>
+            <div class="inline-actions">
+              <a class="button primary compact" id="naverLandLink" href="https://new.land.naver.com" target="_blank" rel="noreferrer">
+                네이버 부동산 열기
+              </a>
+              <a class="button secondary compact" id="naverMapLink" href="https://map.naver.com" target="_blank" rel="noreferrer">
+                지도 열기
+              </a>
+            </div>
+          </div>
+          <p class="embed-note">아래 지도의 핀이 매물 필지 위치입니다. 네이버 부동산·지도는 보안 정책상 화면 안에 직접 표시가 차단되어, 상단 버튼으로 새 탭에서 열립니다 (부동산은 매물 좌표 중심으로 열림).</p>
+          <form class="map-search" id="mapSearchForm">
+            <label>
+              매물 주소
+              <input id="mapAddressInput" type="text" value="서울 양천구 목동 917-9" />
+            </label>
+            <button type="submit" class="button primary">
+              주소 검색
+            </button>
+          </form>
+          <div class="map-workspace">
+            <div class="map-frame-wrap">
+              <iframe
+                id="naverMapFrame"
+                title="네이버 지도 주소 검색"
+                loading="lazy"
+                allow="geolocation; accelerometer; gyroscope"
+              ></iframe>
+              <div class="map-fallback">
+                <span>지도가 표시되지 않으면</span>
+                <button type="button" class="button secondary compact" id="reloadMapButton">다시 불러오기</button>
+                <a class="button secondary compact" id="mapNewTabLink" href="https://map.naver.com" target="_blank" rel="noreferrer">새 탭에서 열기</a>
+              </div>
+            </div>
+            <aside class="map-info" id="mapInfoPanel" aria-live="polite">
+              <span class="status-pill need">토지/건물 확인 필요</span>
+              <h3 id="mapInfoTitle">주소를 선택하세요</h3>
+              <dl id="mapInfoDetails"></dl>
+              <div class="map-actions">
+                <button type="button" class="button secondary compact" id="copyAddressButton">주소 복사</button>
+                <button type="button" class="button primary compact" id="useFinanceButton">매입 계산에 반영</button>
+              </div>
+              <button type="button" class="button primary compact" id="verifyPublicDataButton">
+                공공데이터 검증 (건축물대장·용도지역·실거래가)
+              </button>
+              <div id="publicDataResult" class="public-data-result" aria-live="polite"></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="panel reveal" id="finance" aria-labelledby="financeTitle">
+            <div class="panel-heading">
+              <div>
+                <p class="section-kicker">Acquisition</p>
+                <h2 id="financeTitle">매입 비용 계산</h2>
+              </div>
+            </div>
+            <form class="finance-form" id="financeForm">
+              <label>
+                매입가
+                <input id="purchasePrice" type="text" inputmode="numeric" value="1,000,000,000" data-money />
+                <span class="money-hint" data-money-hint="purchasePrice"></span>
+              </label>
+              <label>
+                대출액
+                <input id="loanAmount" type="text" inputmode="numeric" value="600,000,000" data-money />
+                <span class="money-hint" data-money-hint="loanAmount"></span>
+              </label>
+              <label>
+                보유 현금
+                <input id="cashAvailable" type="text" inputmode="numeric" value="450,000,000" data-money />
+                <span class="money-hint" data-money-hint="cashAvailable"></span>
+              </label>
+              <label>
+                취득세율
+                <input id="taxRate" type="number" value="0.046" min="0" step="0.001" />
+              </label>
+              <label>
+                중개보수율
+                <input id="brokerageRate" type="number" value="0.009" min="0" step="0.001" />
+              </label>
+            </form>
+            <dl class="estimate-grid" id="estimateGrid"></dl>
+            <p class="fine-print">세금과 중개보수는 설정값 기반 추정치입니다. 실제 매입 전 최신 기준과 전문가 검토가 필요합니다.</p>
+        </section>
+      </main>
+    </div>
+    <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+    <dialog class="modal checklist-modal" id="checklistModal" aria-labelledby="checklistModalTitle">
+      <div class="modal-panel checklist-panel">
+        <div class="modal-header">
+          <div>
+            <p class="section-kicker">Checklist Review</p>
+            <h2 id="checklistModalTitle">체크리스트 검토</h2>
+            <p class="checklist-subtitle" id="checklistSubtitle"></p>
+          </div>
+          <button type="button" class="button secondary compact" id="checklistModalClose">닫기</button>
+        </div>
+        <div class="checklist-headline">
+          <div class="grade-stage">
+            <span class="grade-badge grade-none" id="checklistGrade">미검토</span>
+          </div>
+          <div class="checklist-meta">
+            <strong id="checklistScore">점수 —</strong>
+            <span id="checklistProgress"></span>
+          </div>
+          <div class="checklist-controls">
+            <label>
+              검토 프로필
+              <select id="checklistProfile">
+                <option value="building">기존 건물 사용 (매입)</option>
+                <option value="rebuild">철거 후 신축</option>
+                <option value="land">나대지 신축</option>
+              </select>
+            </label>
+            <button type="button" class="button primary compact" id="checklistEvaluateButton">
+              자동 검증 실행
+            </button>
+          </div>
+        </div>
+        <div class="checklist-sections" id="checklistSections"></div>
+      </div>
+    </dialog>
+    <script type="module" src="app.js?v=20260612i"></script>
+  </body>
+</html>

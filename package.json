@@ -1,0 +1,12 @@
+{
+  "name": "realestate-alert-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "open:playwright": "node scripts/open-dashboard-playwright.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.60.0"
+  }
+}

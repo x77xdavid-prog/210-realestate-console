@@ -1,0 +1,28 @@
+# 데이터·개인 정보 (매물장 DB, 등기 대상 CSV, 서버 로그)
+data/
+*.sqlite3
+
+# 실제 키·계정이 들어갈 수 있는 로컬 설정 (config.example.json만 공유)
+config.json
+config.local.json
+.env
+
+# 개인 수집 이미지
+이미지/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Node (Playwright)
+node_modules/
+
+# 세션·테스트 아티팩트
+.playwright-mcp/
+.omc/
+scripts/*.log
+
+# OS
+Thumbs.db
+desktop.ini

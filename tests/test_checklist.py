@@ -1,0 +1,213 @@
+import unittest
+
+from realestate_alert.checklist import (
+    CHECKLIST_ITEMS,
+    PROFILES,
+    compute_review,
+    definition_payload,
+    evaluate_auto_items,
+    items_for_profile,
+)
+
+
+class ChecklistDefinitionTests(unittest.TestCase):
+    def test_item_ids_are_unique(self):
+        ids = [item.item_id for item in CHECKLIST_ITEMS]
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_items_have_valid_kinds_and_profiles(self):
+        for item in CHECKLIST_ITEMS:
+            self.assertIn(item.kind, ("auto", "info", "manual"), item.item_id)
+            self.assertTrue(item.profiles, item.item_id)
+            for profile in item.profiles:
+                self.assertIn(profile, PROFILES, item.item_id)
+
+    def test_rebuild_profile_excludes_building_physical_items(self):
+        ids = {item.item_id for item in items_for_profile("rebuild")}
+        for excluded in ("ceiling_height", "mri_load", "radiation_shield", "elevator", "building_age"):
+            self.assertNotIn(excluded, ids)
+        for included in ("road_access", "demolition_cost", "tenant_eviction", "zoning"):
+            self.assertIn(included, ids)
+
+    def test_rebuild_critical_items(self):
+        critical = {item.item_id for item in items_for_profile("rebuild") if item.critical}
+        self.assertEqual(critical, {"loc_overall", "zoning", "road_access", "tenant_eviction"})
+
+    def test_unknown_profile_raises(self):
+        with self.assertRaises(ValueError):
+            items_for_profile("hotel")
+
+    def test_definition_payload_shape(self):
+        payload = definition_payload()
+        self.assertIn("building", payload["profiles"])
+        self.assertTrue(any(item["item_id"] == "mri_load" for item in payload["items"]))
+
+
+class EvaluateAutoItemsTests(unittest.TestCase):
+    def test_empty_report_yields_unknown(self):
+        results = evaluate_auto_items({}, {"building": None, "land": None, "market": None})
+        self.assertEqual(results["zoning"]["status"], "unknown")
+        self.assertEqual(results["road_access"]["status"], "unknown")
+        self.assertEqual(results["parking"]["status"], "unknown")
+        self.assertEqual(results["price_market"]["status"], "unknown")
+
+    def test_zoning_exclusive_residential_warns(self):
+        report = {"land": {"zoning_names": ["제1종전용주거지역"]}}
+        self.assertEqual(evaluate_auto_items({}, report)["zoning"]["status"], "warn")
+
+    def test_zoning_falls_back_to_listing(self):
+        results = evaluate_auto_items({"zoning": "준주거지역"}, {})
+        self.assertEqual(results["zoning"]["status"], "pass")
+        self.assertIn("준주거지역", results["zoning"]["evidence"])
+
+    def test_blind_land_fails_road_access(self):
+        report = {"land": {"road_side": "맹지"}}
+        self.assertEqual(evaluate_auto_items({}, report)["road_access"]["status"], "fail")
+
+    def test_road_access_pass_with_width_hint(self):
+        report = {"land": {"road_side": "광대한면", "road_width_hint_m": 25}}
+        result = evaluate_auto_items({}, report)["road_access"]
+        self.assertEqual(result["status"], "pass")
+        self.assertIn("25", result["evidence"])
+
+    def test_elevator_fail_when_multistory_without_lift(self):
+        report = {"building": {"elevator_count": 0, "ground_floors": 5}}
+        self.assertEqual(evaluate_auto_items({}, report)["elevator"]["status"], "fail")
+
+    def test_elevator_pass_when_present(self):
+        report = {"building": {"elevator_count": 2, "ground_floors": 5}}
+        self.assertEqual(evaluate_auto_items({}, report)["elevator"]["status"], "pass")
+
+    def test_parking_pass_and_warn(self):
+        ok = {"building": {"parking_spaces": 14, "total_area_m2": 2000}}
+        short = {"building": {"parking_spaces": 5, "total_area_m2": 2000}}
+        self.assertEqual(evaluate_auto_items({}, ok)["parking"]["status"], "pass")
+        self.assertEqual(evaluate_auto_items({}, short)["parking"]["status"], "warn")
+
+    def test_building_age_warns_after_30_years(self):
+        report = {"building": {"approval_year": 1990}}
+        results = evaluate_auto_items({}, report, now_year=2026)
+        self.assertEqual(results["building_age"]["status"], "warn")
+
+    def test_building_age_pass_when_recent(self):
+        report = {"building": {"approval_year": 2015}}
+        results = evaluate_auto_items({}, report, now_year=2026)
+        self.assertEqual(results["building_age"]["status"], "pass")
+
+    def test_rebuild_age_always_pass(self):
+        results = evaluate_auto_items({}, {"building": {"approval_year": 1985}}, now_year=2026)
+        self.assertEqual(results["rebuild_age_ok"]["status"], "pass")
+        self.assertIn("철거", results["rebuild_age_ok"]["evidence"])
+
+    def test_price_market_warns_on_premium(self):
+        listing = {"deposit": 3_000_000_000, "monthly_rent": 0, "building_area_m2": 1000}
+        report = {"market": {"avg_price_per_m2": 2_000_000}}
+        self.assertEqual(evaluate_auto_items(listing, report)["price_market"]["status"], "warn")
+
+    def test_price_market_pass_when_reasonable(self):
+        listing = {"deposit": 2_000_000_000, "monthly_rent": 0, "building_area_m2": 1000}
+        report = {"market": {"avg_price_per_m2": 2_000_000}}
+        self.assertEqual(evaluate_auto_items(listing, report)["price_market"]["status"], "pass")
+
+    def test_buildable_volume_info(self):
+        report = {"building": {"plat_area_m2": 500}}
+        result = evaluate_auto_items({"floor_area_ratio": 200}, report)["buildable_volume"]
+        self.assertEqual(result["status"], "info")
+        self.assertIn("1,000", result["evidence"])
+
+    def test_land_price_basis_with_listing_price(self):
+        listing = {"deposit": 1_000_000_000, "monthly_rent": 0}
+        report = {
+            "building": {"plat_area_m2": 500},
+            "land": {"official_price_per_m2": 1_000_000, "official_price_year": 2025},
+        }
+        result = evaluate_auto_items(listing, report)["land_price_basis"]
+        self.assertEqual(result["status"], "info")
+        self.assertIn("2.0배", result["evidence"])
+
+    def test_current_use_info(self):
+        report = {"building": {"main_purpose": "제2종근린생활시설"}}
+        result = evaluate_auto_items({}, report)["current_use"]
+        self.assertEqual(result["status"], "info")
+        self.assertIn("제2종근린생활시설", result["evidence"])
+
+
+class ComputeReviewTests(unittest.TestCase):
+    def test_critical_fail_forces_no_go(self):
+        auto = {"road_access": {"status": "fail", "evidence": "맹지"}}
+        review = compute_review("land", auto, {})
+        self.assertEqual(review["grade"], "부적합")
+        self.assertTrue(review["no_go"])
+
+    def test_critical_manual_fail_forces_no_go(self):
+        manual = {"tenant_eviction": {"status": "fail", "memo": "명도 거부 임차인"}}
+        review = compute_review("rebuild", {}, manual)
+        self.assertEqual(review["grade"], "부적합")
+
+    def test_all_pass_scores_grade_a(self):
+        items = items_for_profile("land")
+        auto = {i.item_id: {"status": "pass", "evidence": ""} for i in items if i.kind == "auto"}
+        manual = {i.item_id: {"status": "pass", "memo": ""} for i in items if i.kind in ("manual", "info")}
+        review = compute_review("land", auto, manual)
+        self.assertEqual(review["grade"], "A")
+        self.assertEqual(review["score"], 100.0)
+        self.assertFalse(review["no_go"])
+
+    def test_unchecked_and_unknown_excluded_from_score(self):
+        review = compute_review("land", {"zoning": {"status": "pass", "evidence": ""}}, {})
+        self.assertEqual(review["score"], 100.0)
+        self.assertEqual(review["grade"], "A")
+
+    def test_no_judged_items_yields_ungraded(self):
+        review = compute_review("land", {}, {})
+        self.assertIsNone(review["score"])
+        self.assertIsNone(review["grade"])
+
+    def test_warn_counts_half(self):
+        auto = {"zoning": {"status": "warn", "evidence": ""}}
+        review = compute_review("land", auto, {})
+        self.assertEqual(review["score"], 50.0)
+        self.assertEqual(review["grade"], "C")
+
+    def test_na_excluded_from_score(self):
+        manual = {
+            "loc_overall": {"status": "pass", "memo": ""},
+            "loc_pharmacy": {"status": "na", "memo": ""},
+        }
+        review = compute_review("land", {}, manual)
+        self.assertEqual(review["score"], 100.0)
+
+    def test_progress_counts(self):
+        auto = {
+            "zoning": {"status": "pass", "evidence": ""},
+            "road_access": {"status": "unknown", "evidence": ""},
+        }
+        manual = {"loc_overall": {"status": "pass", "memo": ""}}
+        review = compute_review("land", auto, manual)
+        self.assertEqual(review["progress"]["auto_done"], 1)
+        self.assertGreater(review["progress"]["auto_total"], 1)
+        self.assertEqual(review["progress"]["manual_done"], 1)
+
+    def test_items_include_definition_and_state(self):
+        review = compute_review("building", {}, {"mri_load": {"status": "fail", "memo": "보강 불가"}})
+        row = next(item for item in review["items"] if item["item_id"] == "mri_load")
+        self.assertEqual(row["status"], "fail")
+        self.assertEqual(row["memo"], "보강 불가")
+        self.assertEqual(row["category"], "물리")
+
+    def test_info_item_scored_by_manual_confirmation(self):
+        auto = {"buildable_volume": {"status": "info", "evidence": "대지 500㎡ × 200%"}}
+        manual = {"buildable_volume": {"status": "fail", "memo": "목표 연면적 미달"}}
+        review = compute_review("land", auto, manual)
+        row = next(item for item in review["items"] if item["item_id"] == "buildable_volume")
+        self.assertEqual(row["status"], "fail")
+        self.assertEqual(row["evidence"], "대지 500㎡ × 200%")
+        self.assertEqual(review["score"], 0.0)
+
+    def test_invalid_profile_raises(self):
+        with self.assertRaises(ValueError):
+            compute_review("hotel", {}, {})
+
+
+if __name__ == "__main__":
+    unittest.main()

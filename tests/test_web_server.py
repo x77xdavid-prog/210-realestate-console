@@ -1,0 +1,365 @@
+import http.client
+import json
+import os
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from http.server import ThreadingHTTPServer
+from unittest import mock
+
+from realestate_alert.web_server import create_handler
+
+
+class WebServerTests(unittest.TestCase):
+    def test_api_listings_returns_matching_listings(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                response = _request_json(server, "GET", "/api/listings")
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertEqual(response["fetched_count"], 2)
+        self.assertEqual(response["matched_count"], 1)
+        self.assertEqual(response["listings"][0]["external_id"], "match")
+        self.assertEqual(response["listings"][0]["registry_status"], "등기 확인 필요")
+        self.assertTrue(response["listings"][0]["is_match"])
+        self.assertEqual(len(response["unmatched_listings"]), 1)
+        self.assertEqual(response["unmatched_listings"][0]["external_id"], "miss")
+        self.assertFalse(response["unmatched_listings"][0]["is_match"])
+
+    def test_api_scan_reports_only_new_notifications(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                first = _request_json(server, "POST", "/api/scan")
+                second = _request_json(server, "POST", "/api/scan")
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertEqual(first["notified_count"], 1)
+        self.assertEqual(second["notified_count"], 0)
+
+    def test_api_listings_includes_naver_and_new_flags(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            clean_env = {k: v for k, v in os.environ.items()
+                         if k not in ("DATA_GO_KR_API_KEY", "VWORLD_API_KEY")}
+            try:
+                with mock.patch.dict("os.environ", clean_env, clear=True):
+                    response = _request_json(server, "GET", "/api/listings")
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        listing = response["listings"][0]
+        self.assertIn("new.land.naver.com", listing["naver_land_url"])
+        self.assertIn("map.naver.com", listing["naver_map_url"])
+        self.assertTrue(listing["is_new"])
+        self.assertFalse(listing["is_favorite"])
+        self.assertEqual(response["new_count"], 1)
+        # 키가 없으면 좌표는 None, 링크는 주소 검색 방식으로 동작한다
+        self.assertIsNone(listing["latitude"])
+        self.assertIsNone(listing["longitude"])
+
+    def test_api_geocode_requires_address(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            clean_env = {k: v for k, v in os.environ.items()
+                         if k not in ("DATA_GO_KR_API_KEY", "VWORLD_API_KEY")}
+            try:
+                with mock.patch.dict("os.environ", clean_env, clear=True):
+                    result = _request_json(server, "GET", "/api/geocode?address=%EC%84%9C%EC%9A%B8")
+                    with self.assertRaises(AssertionError):
+                        _request_json(server, "GET", "/api/geocode")
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertIsNone(result["latitude"])
+
+    def test_api_favorites_toggle_roundtrip(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                payload = {
+                    "identity": "manual:match",
+                    "listing": {"title": "강남구 병원 가능 상가", "location": "서울 강남구 역삼동"},
+                }
+                first = _request_json(server, "POST", "/api/favorites/toggle", payload)
+                favorites = _request_json(server, "GET", "/api/favorites")
+                second = _request_json(server, "POST", "/api/favorites/toggle", payload)
+                emptied = _request_json(server, "GET", "/api/favorites")
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertTrue(first["is_favorite"])
+        self.assertEqual(len(favorites["favorites"]), 1)
+        self.assertFalse(second["is_favorite"])
+        self.assertEqual(emptied["favorites"], [])
+
+    def test_api_verify_reports_missing_keys_gracefully(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            clean_env = {k: v for k, v in os.environ.items()
+                         if k not in ("DATA_GO_KR_API_KEY", "VWORLD_API_KEY")}
+            try:
+                with mock.patch.dict("os.environ", clean_env, clear=True):
+                    report = _request_json(
+                        server, "POST", "/api/verify",
+                        {"address": "서울 양천구 목동 917-9", "months": 1},
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertEqual(report["parcel"]["pnu"], "1147010100109170009")
+        self.assertIn("building", report["errors"])
+        self.assertIn("land", report["errors"])
+
+    def test_api_ledger_upsert_and_delete(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                saved = _request_json(
+                    server,
+                    "POST",
+                    "/api/ledger",
+                    {
+                        "identity": "manual:match",
+                        "listing": {"title": "강남구 병원 가능 상가"},
+                        "status": "방문 예정",
+                        "memo": "다음주 화요일 방문",
+                    },
+                )
+                entries = _request_json(server, "GET", "/api/ledger")
+                deleted = _request_json(server, "POST", "/api/ledger/delete", {"identity": "manual:match"})
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertEqual(saved["entry"]["status"], "방문 예정")
+        self.assertEqual(len(entries["entries"]), 1)
+        self.assertEqual(entries["entries"][0]["memo"], "다음주 화요일 방문")
+        self.assertIn("검토중", entries["statuses"])
+        self.assertTrue(deleted["deleted"])
+
+
+class ChecklistApiTests(unittest.TestCase):
+    def test_definition_endpoint(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                response = _request_json(server, "GET", "/api/checklist/definition")
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertIn("building", response["profiles"])
+        self.assertIn("rebuild", response["profiles"])
+        self.assertTrue(any(item["item_id"] == "road_access" for item in response["items"]))
+
+    def test_evaluate_and_manual_flow(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            clean_env = {k: v for k, v in os.environ.items()
+                         if k not in ("DATA_GO_KR_API_KEY", "VWORLD_API_KEY")}
+            try:
+                with mock.patch.dict("os.environ", clean_env, clear=True):
+                    evaluated = _request_json(
+                        server, "POST", "/api/checklist/evaluate",
+                        {
+                            "identity": "manual:match",
+                            "listing": {
+                                "title": "후보",
+                                "location": "서울 양천구 목동 917-9",
+                                "zoning": "준주거지역",
+                            },
+                            "profile": "rebuild",
+                        },
+                    )
+                    manual = _request_json(
+                        server, "POST", "/api/checklist/manual",
+                        {
+                            "identity": "manual:match",
+                            "item_id": "loc_overall",
+                            "status": "pass",
+                            "memo": "입지 양호",
+                        },
+                    )
+                    reviews = _request_json(server, "GET", "/api/checklist/reviews")
+                    single = _request_json(
+                        server, "GET", "/api/checklist/review?identity=manual%3Amatch"
+                    )
+                    previewed = _request_json(
+                        server,
+                        "GET",
+                        "/api/checklist/review?identity=manual%3Amatch&profile=building",
+                    )
+                    missing = _request_json(
+                        server, "GET", "/api/checklist/review?identity=manual%3Anone"
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertEqual(evaluated["review"]["profile"], "rebuild")
+        zoning = next(i for i in evaluated["review"]["items"] if i["item_id"] == "zoning")
+        self.assertEqual(zoning["status"], "pass")  # 키 없어도 listing.zoning 폴백
+        self.assertIn("errors", evaluated)
+
+        self.assertGreaterEqual(manual["review"]["progress"]["manual_done"], 1)
+        loc = next(i for i in manual["review"]["items"] if i["item_id"] == "loc_overall")
+        self.assertEqual(loc["memo"], "입지 양호")
+
+        self.assertIn("manual:match", reviews["reviews"])
+        self.assertEqual(reviews["reviews"]["manual:match"]["profile"], "rebuild")
+
+        self.assertEqual(single["review"]["profile"], "rebuild")
+        # 프로필 쿼리로 저장 없이 다른 프로필 미리보기 계산
+        self.assertEqual(previewed["review"]["profile"], "building")
+        self.assertIsNone(missing["review"])
+
+    def test_manual_rejects_bad_status_and_item(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                with self.assertRaises(AssertionError):
+                    _request_json(
+                        server, "POST", "/api/checklist/manual",
+                        {"identity": "a:1", "item_id": "loc_overall", "status": "maybe"},
+                    )
+                with self.assertRaises(AssertionError):
+                    _request_json(
+                        server, "POST", "/api/checklist/manual",
+                        {"identity": "a:1", "item_id": "nope", "status": "pass"},
+                    )
+                with self.assertRaises(AssertionError):
+                    _request_json(
+                        server, "POST", "/api/checklist/evaluate",
+                        {"identity": "a:1", "listing": {"title": "주소 없음"}, "profile": "building"},
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+    def test_listings_include_first_seen_at(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                _request_json(server, "POST", "/api/scan")
+                response = _request_json(server, "GET", "/api/listings")
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertIn("first_seen_at", response["listings"][0])
+        self.assertTrue(response["listings"][0]["first_seen_at"])
+
+
+def _write_fixture_config(root: Path) -> Path:
+    listings_path = root / "listings.json"
+    listings_path.write_text(
+        json.dumps(
+            [
+                {
+                    "source": "manual",
+                    "external_id": "match",
+                    "title": "강남구 병원 가능 상가",
+                    "location": "서울 강남구 역삼동",
+                    "deposit": 80000000,
+                    "monthly_rent": 4000000,
+                    "area_m2": 90,
+                    "floor": "2층",
+                    "premium": 0,
+                    "url": "https://example.test/match",
+                },
+                {
+                    "source": "manual",
+                    "external_id": "miss",
+                    "title": "예산 초과 상가",
+                    "location": "서울 강남구",
+                    "deposit": 200000000,
+                    "monthly_rent": 4000000,
+                    "area_m2": 90,
+                    "floor": "1층",
+                    "premium": 0,
+                    "url": "https://example.test/miss",
+                },
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    config_path = root / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "database_path": str(root / "seen.sqlite3"),
+                "criteria": {
+                    "locations": ["강남구"],
+                    "max_deposit": 100000000,
+                    "max_monthly_rent": 5000000,
+                    "min_area_m2": 80,
+                    "required_keywords": ["병원"],
+                },
+                "sources": [{"type": "json_file", "path": str(listings_path)}],
+                "notifiers": [{"type": "memory"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def _start_server(config_path: Path, web_root: Path) -> ThreadingHTTPServer:
+    handler = create_handler(config_path=config_path, web_root=web_root)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
+
+
+def _request_json(server: ThreadingHTTPServer, method: str, path: str, payload: dict | None = None) -> dict:
+    connection = http.client.HTTPConnection(server.server_address[0], server.server_address[1], timeout=5)
+    try:
+        body_bytes = None
+        headers = {}
+        if payload is not None:
+            body_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            headers["Content-Type"] = "application/json; charset=utf-8"
+        connection.request(method, path, body=body_bytes, headers=headers)
+        response = connection.getresponse()
+        body = response.read().decode("utf-8")
+    finally:
+        connection.close()
+    if response.status != 200:
+        raise AssertionError(f"Expected 200, got {response.status}: {body}")
+    return json.loads(body)

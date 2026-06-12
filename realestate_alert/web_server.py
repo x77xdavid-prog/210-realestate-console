@@ -1,0 +1,377 @@
+from __future__ import annotations
+
+import json
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qs, urlparse
+
+from realestate_alert.checklist import (
+    ITEM_IDS,
+    MANUAL_STATUSES,
+    PROFILES,
+    compute_review,
+    definition_payload,
+    evaluate_auto_items,
+)
+from realestate_alert.config import load_config
+from realestate_alert.land_info import geocode_parcel
+from realestate_alert.models import Listing
+from realestate_alert.naver import naver_land_coord_url, naver_land_url, naver_map_url
+from realestate_alert.public_data import PublicDataError
+from realestate_alert.registry import RegistryStatus
+from realestate_alert.service import collect_listings, run_once
+from realestate_alert.store import LEDGER_STATUSES, ListingStore
+from realestate_alert.verify import verify_address
+
+MAX_BODY_BYTES = 256 * 1024
+
+
+def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestHandler]:
+    class RealEstateAlertHandler(SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(web_root), **kwargs)
+
+        def do_GET(self) -> None:
+            if self.path == "/api/listings":
+                self._send_json(_listings_payload(config_path))
+                return
+            if self.path.startswith("/api/geocode"):
+                query = parse_qs(urlparse(self.path).query)
+                address = (query.get("address") or [""])[0].strip()
+                if not address:
+                    self._send_json({"error": "address가 필요합니다."}, status=400)
+                    return
+                coords = _safe_geocode(address)
+                self._send_json(
+                    {
+                        "address": address,
+                        "latitude": coords[0] if coords else None,
+                        "longitude": coords[1] if coords else None,
+                    }
+                )
+                return
+            if self.path == "/api/favorites":
+                self._send_json({"favorites": _store(config_path).list_favorites()})
+                return
+            if self.path == "/api/ledger":
+                self._send_json(
+                    {
+                        "entries": _store(config_path).list_ledger_entries(),
+                        "statuses": LEDGER_STATUSES,
+                    }
+                )
+                return
+            if self.path == "/api/checklist/definition":
+                self._send_json(definition_payload())
+                return
+            if self.path == "/api/checklist/reviews":
+                self._send_json({"reviews": _review_summaries(config_path)})
+                return
+            if self.path.startswith("/api/checklist/review"):
+                query = parse_qs(urlparse(self.path).query)
+                identity = (query.get("identity") or [""])[0].strip()
+                if not identity:
+                    self._send_json({"error": "identity가 필요합니다."}, status=400)
+                    return
+                stored = _store(config_path).get_checklist_review(identity)
+                review = None
+                if stored:
+                    # 프로필 전환 미리보기: 저장 없이 다른 프로필로 계산만 한다
+                    override = (query.get("profile") or [""])[0].strip()
+                    profile = override if override in PROFILES else stored["profile"]
+                    review = compute_review(profile, stored.get("auto"), stored.get("manual"))
+                self._send_json({"identity": identity, "review": review})
+                return
+            if self.path == "/":
+                self.path = "/index.html"
+            super().do_GET()
+
+        def do_POST(self) -> None:
+            if self.path == "/api/scan":
+                result = run_once(load_config(config_path))
+                self._send_json(
+                    {
+                        "fetched_count": result.fetched_count,
+                        "matched_count": result.matched_count,
+                        "notified_count": len(result.notified),
+                        "notified": [_listing_to_dict(listing) for listing in result.notified],
+                    }
+                )
+                return
+            if self.path == "/api/favorites/toggle":
+                body = self._read_json_body()
+                identity = str(body.get("identity", "")).strip()
+                listing = body.get("listing")
+                if not identity or not isinstance(listing, dict):
+                    self._send_json({"error": "identity와 listing이 필요합니다."}, status=400)
+                    return
+                is_favorite = _store(config_path).toggle_favorite(identity, listing)
+                self._send_json({"identity": identity, "is_favorite": is_favorite})
+                return
+            if self.path == "/api/ledger":
+                body = self._read_json_body()
+                identity = str(body.get("identity", "")).strip()
+                listing = body.get("listing")
+                status = str(body.get("status", LEDGER_STATUSES[0]))
+                memo = str(body.get("memo", ""))
+                if not identity or not isinstance(listing, dict):
+                    self._send_json({"error": "identity와 listing이 필요합니다."}, status=400)
+                    return
+                if status not in LEDGER_STATUSES:
+                    self._send_json({"error": f"지원하지 않는 상태: {status}"}, status=400)
+                    return
+                entry = _store(config_path).upsert_ledger_entry(identity, listing, status, memo)
+                self._send_json({"entry": entry})
+                return
+            if self.path == "/api/verify":
+                body = self._read_json_body()
+                address = str(body.get("address", "")).strip()
+                if not address:
+                    self._send_json({"error": "address가 필요합니다."}, status=400)
+                    return
+                months = body.get("months", 6)
+                if not isinstance(months, int) or not (1 <= months <= 12):
+                    months = 6
+                self._send_json(verify_address(address, market_months=months))
+                return
+            if self.path == "/api/ledger/delete":
+                body = self._read_json_body()
+                identity = str(body.get("identity", "")).strip()
+                if not identity:
+                    self._send_json({"error": "identity가 필요합니다."}, status=400)
+                    return
+                deleted = _store(config_path).delete_ledger_entry(identity)
+                self._send_json({"identity": identity, "deleted": deleted})
+                return
+            if self.path == "/api/checklist/evaluate":
+                body = self._read_json_body()
+                identity = str(body.get("identity", "")).strip()
+                listing = body.get("listing")
+                profile = str(body.get("profile", "building"))
+                if not identity or not isinstance(listing, dict):
+                    self._send_json({"error": "identity와 listing이 필요합니다."}, status=400)
+                    return
+                if profile not in PROFILES:
+                    self._send_json({"error": f"지원하지 않는 프로필: {profile}"}, status=400)
+                    return
+                address = str(listing.get("location", "")).strip()
+                if not address:
+                    self._send_json({"error": "listing.location(주소)이 필요합니다."}, status=400)
+                    return
+                report = verify_address(address)
+                auto = evaluate_auto_items(listing, report)
+                store = _store(config_path)
+                stored = store.get_checklist_review(identity) or {}
+                review = {
+                    "profile": profile,
+                    "auto": auto,
+                    "manual": stored.get("manual", {}),
+                    "evaluated_at": _utc_now_iso(),
+                }
+                store.save_checklist_review(identity, review)
+                self._send_json(
+                    {
+                        "identity": identity,
+                        "review": compute_review(profile, auto, review["manual"]),
+                        "errors": report.get("errors", {}),
+                        "evaluated_at": review["evaluated_at"],
+                    }
+                )
+                return
+            if self.path == "/api/checklist/manual":
+                body = self._read_json_body()
+                identity = str(body.get("identity", "")).strip()
+                item_id = str(body.get("item_id", "")).strip()
+                status = str(body.get("status", "")).strip()
+                memo = str(body.get("memo", ""))
+                if not identity or not item_id:
+                    self._send_json({"error": "identity와 item_id가 필요합니다."}, status=400)
+                    return
+                if item_id not in ITEM_IDS:
+                    self._send_json({"error": f"알 수 없는 체크 항목: {item_id}"}, status=400)
+                    return
+                if status not in MANUAL_STATUSES:
+                    self._send_json({"error": f"지원하지 않는 체크 상태: {status}"}, status=400)
+                    return
+                store = _store(config_path)
+                stored = store.get_checklist_review(identity) or {
+                    "profile": "building",
+                    "auto": {},
+                    "manual": {},
+                }
+                requested_profile = body.get("profile")
+                if isinstance(requested_profile, str) and requested_profile in PROFILES:
+                    stored["profile"] = requested_profile
+                manual = dict(stored.get("manual", {}))
+                manual[item_id] = {"status": status, "memo": memo}
+                stored["manual"] = manual
+                store.save_checklist_review(identity, stored)
+                self._send_json(
+                    {
+                        "identity": identity,
+                        "review": compute_review(
+                            stored["profile"], stored.get("auto"), manual
+                        ),
+                    }
+                )
+                return
+            self.send_error(404, "Not found")
+
+        def end_headers(self) -> None:
+            # 로컬 대시보드는 항상 최신 정적 파일을 쓰도록 캐시를 끈다.
+            self.send_header("Cache-Control", "no-cache")
+            super().end_headers()
+
+        def log_message(self, format: str, *args) -> None:
+            return
+
+        def _read_json_body(self) -> dict[str, Any]:
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return {}
+            if length <= 0 or length > MAX_BODY_BYTES:
+                return {}
+            raw = self.rfile.read(length)
+            try:
+                data = json.loads(raw.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return {}
+            return data if isinstance(data, dict) else {}
+
+        def _send_json(self, payload: dict[str, Any], status: int = 200) -> None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    return RealEstateAlertHandler
+
+
+def serve(config_path: Path, web_root: Path, host: str = "127.0.0.1", port: int = 8765) -> None:
+    handler = create_handler(config_path=config_path, web_root=web_root)
+    server = ThreadingHTTPServer((host, port), handler)
+    print(f"Serving dashboard at http://{host}:{port}/")
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+
+
+def _store(config_path: Path) -> ListingStore:
+    return ListingStore(load_config(config_path).database_path)
+
+
+def _utc_now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _review_summaries(config_path: Path) -> dict[str, Any]:
+    """저장된 검토 전체를 매물장 배지용 요약(등급·점수·진행률)으로 변환한다."""
+    summaries: dict[str, Any] = {}
+    for identity, stored in _store(config_path).all_checklist_reviews().items():
+        computed = compute_review(
+            stored.get("profile", "building"), stored.get("auto"), stored.get("manual")
+        )
+        summaries[identity] = {
+            "profile": computed["profile"],
+            "grade": computed["grade"],
+            "score": computed["score"],
+            "no_go": computed["no_go"],
+            "progress": computed["progress"],
+            "evaluated_at": stored.get("evaluated_at"),
+        }
+    return summaries
+
+
+def _safe_geocode(location: str) -> tuple[float, float] | None:
+    try:
+        return geocode_parcel(location)
+    except PublicDataError:
+        return None
+
+
+def _listings_payload(config_path: Path) -> dict[str, Any]:
+    config = load_config(config_path)
+    snapshot = collect_listings(config)
+    store = ListingStore(config.database_path)
+    first_seen = store.first_seen_map()
+    favorites = store.favorite_identities()
+
+    def to_dict(listing: Listing, is_match: bool) -> dict[str, Any]:
+        return _listing_to_dict(
+            listing,
+            is_new=store.is_recent(first_seen.get(listing.identity)),
+            is_favorite=listing.identity in favorites,
+            is_match=is_match,
+            first_seen_at=first_seen.get(listing.identity),
+        )
+
+    matched_ids = {listing.identity for listing in snapshot.matched}
+    listings = [to_dict(listing, True) for listing in snapshot.matched]
+    unmatched = [
+        to_dict(listing, False)
+        for listing in snapshot.fetched
+        if listing.identity not in matched_ids
+    ]
+    return {
+        "fetched_count": snapshot.fetched_count,
+        "matched_count": snapshot.matched_count,
+        "new_count": sum(1 for item in listings if item["is_new"]),
+        "favorite_count": len(favorites),
+        "listings": listings,
+        "unmatched_listings": unmatched,
+    }
+
+
+def _listing_to_dict(
+    listing: Listing,
+    is_new: bool = False,
+    is_favorite: bool = False,
+    is_match: bool = True,
+    first_seen_at: str | None = None,
+) -> dict[str, Any]:
+    coords = _safe_geocode(listing.location)
+    return {
+        "identity": listing.identity,
+        "source": listing.source,
+        "external_id": listing.external_id,
+        "title": listing.title,
+        "location": listing.location,
+        "deposit": listing.deposit,
+        "monthly_rent": listing.monthly_rent,
+        "area_m2": listing.area_m2,
+        "floor": listing.floor,
+        "premium": listing.premium,
+        "url": listing.url,
+        "property_type": listing.property_type,
+        "land_area_m2": listing.land_area_m2,
+        "building_area_m2": listing.building_area_m2,
+        "floors_total": listing.floors_total,
+        "parking_spaces": listing.parking_spaces,
+        "zoning": listing.zoning,
+        "road_access": listing.road_access,
+        "building_coverage_ratio": listing.building_coverage_ratio,
+        "floor_area_ratio": listing.floor_area_ratio,
+        "approval_year": listing.approval_year,
+        "elevator": listing.elevator,
+        "buildable_note": listing.buildable_note,
+        "latitude": coords[0] if coords else None,
+        "longitude": coords[1] if coords else None,
+        "naver_land_url": (
+            naver_land_coord_url(coords[0], coords[1]) if coords else naver_land_url(listing.location)
+        ),
+        "naver_map_url": naver_map_url(listing.location),
+        "is_new": is_new,
+        "is_favorite": is_favorite,
+        "is_match": is_match,
+        "first_seen_at": first_seen_at,
+        "registry_status": RegistryStatus.NEEDS_CHECK.value,
+        "registry_risks": [],
+        "registryText": "",
+    }
