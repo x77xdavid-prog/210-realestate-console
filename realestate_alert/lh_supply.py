@@ -116,5 +116,6 @@ def _listing_from_notice(item: dict[str, Any]) -> Listing | None:
         premium=None,
         url=str(item.get("DTL_URL", "")).strip() or "https://apply.lh.or.kr",
         property_type="land" if str(item.get("UPP_AIS_TP_CD", "")) == "01" else "building",
+        usage=type_name or None,
         buildable_note=" · ".join(note_parts),
     )

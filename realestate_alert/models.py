@@ -16,6 +16,7 @@ class Listing:
     premium: int | None
     url: str
     property_type: str | None = None
+    usage: str | None = None
     land_area_m2: float | None = None
     building_area_m2: float | None = None
     floors_total: int | None = None

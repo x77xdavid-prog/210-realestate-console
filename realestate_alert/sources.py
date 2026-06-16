@@ -37,6 +37,7 @@ def _listing_from_dict(data: dict, default_source: str) -> Listing:
         premium=None if data.get("premium") is None else int(data.get("premium")),
         url=str(data["url"]),
         property_type=None if data.get("property_type") is None else str(data.get("property_type")),
+        usage=None if data.get("usage") is None else str(data.get("usage")),
         land_area_m2=_optional_float(data.get("land_area_m2")),
         building_area_m2=_optional_float(data.get("building_area_m2")),
         floors_total=_optional_int(data.get("floors_total")),

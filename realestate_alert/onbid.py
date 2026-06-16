@@ -138,6 +138,7 @@ def _listing_from_item(item: dict[str, Any]) -> Listing | None:
         premium=None,
         url=ONBID_PORTAL_URL,
         property_type="land" if (building_area or 0) == 0 else "building",
+        usage=usage or None,
         land_area_m2=land_area,
         building_area_m2=building_area,
         buildable_note=" · ".join(note_parts),

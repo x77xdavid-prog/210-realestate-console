@@ -37,6 +37,7 @@ from realestate_alert.naver import naver_land_coord_url, naver_land_url, naver_m
 from realestate_alert.public_data import PublicDataError
 from realestate_alert.registry import RegistryStatus
 from realestate_alert.filtering import matches_listing
+from realestate_alert.hospital_fit import classify as classify_hospital_fit
 from realestate_alert.service import ListingSnapshot, collect_listings, run_once
 from realestate_alert.store import LEDGER_STATUSES, ListingStore
 from realestate_alert.verify import verify_address
@@ -757,6 +758,8 @@ def _listing_to_dict(
         "identity": listing.identity,
         "source": listing.source,
         "external_id": listing.external_id,
+        "hospital_fit": classify_hospital_fit(listing),
+        "usage": listing.usage,
         "title": listing.title,
         "location": listing.location,
         "deposit": listing.deposit,

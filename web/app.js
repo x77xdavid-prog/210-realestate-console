@@ -109,6 +109,7 @@ const elements = {
   favoriteCount: document.querySelector("#favoriteCount"),
   boardGrid: document.querySelector("#boardGrid"),
   regionFilter: document.querySelector("#regionFilter"),
+  fitFilter: document.querySelector("#fitFilter"),
   ledgerRows: document.querySelector("#ledgerRows"),
   ledgerSummary: document.querySelector("#ledgerSummary"),
   priorityList: document.querySelector("#priorityList"),
@@ -159,6 +160,7 @@ const state = {
   ledger: new Map(),
   boardFilter: "all",
   regionFilter: "all",
+  fitFilter: "all",
   hasServer: false,
   selectedListing: null,
   checklist: {
@@ -928,7 +930,9 @@ function renderBoard() {
   document.querySelector("#countFit").textContent = fitGroups().met.length;
 
   // '수집 전체'는 수백 건이라 3D 카드 대신 소스별 컴팩트 표로 보여준다(빠르게 뜨고 한눈에).
-  elements.regionFilter.hidden = state.boardFilter !== "fetched";
+  const isFetched = state.boardFilter === "fetched";
+  elements.fitFilter.hidden = !isFetched;
+  elements.regionFilter.hidden = !isFetched;
 
   if (state.boardFilter === "fit") {
     renderFitBoard();
@@ -1003,6 +1007,7 @@ function listingCardHtml(listing) {
         <div><dt>층수 · 주차</dt><dd>${listing.floors_total ? `${listing.floors_total}층` : "-"} · ${listing.parking_spaces ?? "-"}대</dd></div>
       </dl>
       <div class="card-pills">
+        ${fitBadgeHtml(listing)}
         ${listing.is_match === false ? '<span class="status-pill risk">검색 조건 불일치</span>' : ""}
         <span class="status-pill ${fit.className}">${escapeHtml(fit.label)}</span>
         <span class="status-pill ${registry.className}">${escapeHtml(registry.label)}</span>
@@ -1039,12 +1044,14 @@ function sortByOrder(values, order) {
 function renderFetchedTable() {
   const all = [...state.listings, ...state.unmatched];
   const regions = sortByOrder([...new Set(all.map((item) => regionOf(item.location)))], REGION_ORDER);
+  renderFitChips(all);
   renderRegionChips(regions);
 
-  const region = state.regionFilter;
-  const filtered = region === "all" ? all : all.filter((item) => regionOf(item.location) === region);
+  let filtered = all;
+  if (state.fitFilter !== "all") filtered = filtered.filter((item) => fitLevel(item) === state.fitFilter);
+  if (state.regionFilter !== "all") filtered = filtered.filter((item) => regionOf(item.location) === state.regionFilter);
   if (filtered.length === 0) {
-    elements.boardGrid.innerHTML = '<div class="empty-state">해당 지역에 수집된 매물이 없습니다.</div>';
+    elements.boardGrid.innerHTML = '<div class="empty-state">조건에 맞는 수집 매물이 없습니다. 필터를 조정하세요.</div>';
     return;
   }
 
@@ -1056,18 +1063,55 @@ function renderFetchedTable() {
   const orderedKeys = sortByOrder([...groups.keys()], SOURCE_ORDER);
 
   const head =
-    "<thead><tr><th>유형</th><th>제목</th><th>위치</th><th>전용/대지</th>" +
+    "<thead><tr><th>적합도</th><th>유형</th><th>제목</th><th>위치</th><th>전용/대지</th>" +
     "<th>층·주차</th><th>조건</th><th>메모</th><th>링크</th></tr></thead>";
   const bodies = orderedKeys
     .map((key) => {
       const rows = sortNewFirst(groups.get(key));
-      const header = `<tr class="collect-group-head"><td colspan="8">${escapeHtml(
+      const header = `<tr class="collect-group-head"><td colspan="9">${escapeHtml(
         sourceLabel(key),
       )} <span class="chip-count">${rows.length}</span></td></tr>`;
       return `<tbody>${header}${rows.map(collectRowHtml).join("")}</tbody>`;
     })
     .join("");
   elements.boardGrid.innerHTML = `<div class="table-wrap collect-table-wrap"><table class="collect-table">${head}${bodies}</table></div>`;
+}
+
+const FIT_CHIPS = [
+  { key: "all", label: "전체" },
+  { key: "open", label: "🏥 병원 개원 가능" },
+  { key: "build", label: "🏗️ 병원 신축 가능" },
+  { key: "check", label: "확인 필요" },
+  { key: "unfit", label: "부적합" },
+];
+
+function fitLevel(listing) {
+  return (listing.hospital_fit && listing.hospital_fit.level) || "check";
+}
+
+function fitBadgeHtml(listing) {
+  const fit = listing.hospital_fit;
+  if (!fit) return "";
+  return `<span class="fit-pill ${fit.level}" title="${escapeHtml(fit.reason || "")}">${escapeHtml(fit.label)}</span>`;
+}
+
+function renderFitChips(all) {
+  const counts = { open: 0, build: 0, check: 0, unfit: 0 };
+  all.forEach((item) => {
+    const level = fitLevel(item);
+    counts[level] = (counts[level] || 0) + 1;
+  });
+  const countOf = (key) => (key === "all" ? all.length : counts[key] || 0);
+  elements.fitFilter.innerHTML = FIT_CHIPS.map(
+    (chip) =>
+      `<button type="button" class="filter-chip${state.fitFilter === chip.key ? " active" : ""}" data-fit="${chip.key}">${chip.label} <span class="chip-count">${countOf(chip.key)}</span></button>`,
+  ).join("");
+  elements.fitFilter.querySelectorAll("[data-fit]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.fitFilter = button.dataset.fit;
+      renderBoard();
+    });
+  });
 }
 
 function renderRegionChips(regions) {
@@ -1104,6 +1148,7 @@ function collectRowHtml(listing) {
   }대`;
   return `
     <tr data-row-identity="${escapeHtml(identity)}">
+      <td>${fitBadgeHtml(listing)}</td>
       <td><span class="type-chip">${isLand ? "토지" : "건물"}</span></td>
       <td class="collect-title">${newBadge}${escapeHtml(listing.title)}</td>
       <td>${escapeHtml(listing.location)}</td>

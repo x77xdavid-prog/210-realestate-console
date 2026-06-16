@@ -1106,6 +1106,34 @@ td span {
   font-size: 0.76rem;
 }
 
+/* ===== 병원 적합도 배지 ===== */
+.fit-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.fit-pill.open {
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+.fit-pill.build {
+  background: var(--green-soft);
+  color: var(--green);
+}
+.fit-pill.check {
+  background: #fef4e6;
+  color: #b45309;
+}
+.fit-pill.unfit {
+  background: rgba(13, 36, 54, 0.06);
+  color: var(--ink-faint);
+}
+
 /* ===== 수집 전체 — 소스별 컴팩트 표 ===== */
 .board-subfilter {
   display: flex;

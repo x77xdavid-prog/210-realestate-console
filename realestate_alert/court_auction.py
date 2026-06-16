@@ -201,6 +201,7 @@ def _listing_from_item(item: dict[str, Any]) -> Listing | None:
         premium=None,
         url=BASE_URL,
         property_type="land" if is_land else "building",
+        usage=usage or None,
         buildable_note=" · ".join(note_parts) + (f" · {building_desc}" if building_desc else ""),
     )
 
