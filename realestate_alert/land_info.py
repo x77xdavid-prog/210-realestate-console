@@ -120,6 +120,15 @@ def fetch_official_land_price(
     return to_float(str(latest.get("pblntfPclnd", ""))), str(latest.get("stdrYear", "")) or None
 
 
+def cached_coords(address: str) -> tuple[float, float] | None:
+    """이미 변환된 좌표만 반환한다(네트워크 호출 없음). 캐시에 없으면 None.
+
+    HTTP 요청 경로에서 동기 지오코딩으로 응답이 지연/502되는 것을 막기 위해,
+    좌표는 백그라운드 수집 때 미리 변환(캐시 워밍)하고 응답은 캐시만 읽는다.
+    """
+    return _geocode_cache.get(address)
+
+
 def geocode_parcel(
     address: str, key: str | None = None, fetcher: Fetcher | None = None
 ) -> tuple[float, float] | None:

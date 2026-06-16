@@ -30,7 +30,7 @@ from realestate_alert.documents import (
     list_documents,
     save_document,
 )
-from realestate_alert.land_info import geocode_parcel
+from realestate_alert.land_info import cached_coords, geocode_parcel
 from realestate_alert.medical_nearby import fetch_medical_nearby, medical_to_dict
 from realestate_alert.models import Listing
 from realestate_alert.naver import naver_land_coord_url, naver_land_url, naver_map_url
@@ -67,12 +67,20 @@ def _run_collection(config_path: Path) -> None:
         _collecting.add(key)
     try:
         snapshot = collect_listings(load_config(config_path))
+        # 좌표 변환은 백그라운드에서 미리 끝낸다 — HTTP 응답이 동기 지오코딩으로 502 나는 것 방지.
+        _warm_match_coords(snapshot.matched)
         _snapshot_cache[key] = snapshot
         _snapshot_fetched_at[key] = time.monotonic()
     except Exception as error:  # noqa: BLE001 — 수집 실패는 다음 주기에 재시도
         print(f"[collect] 백그라운드 수집 실패: {error}")
     finally:
         _collecting.discard(key)
+
+
+def _warm_match_coords(listings: list[Listing]) -> None:
+    """조건 일치 매물의 좌표를 미리 변환해 캐시에 채운다(백그라운드 전용)."""
+    for listing in listings:
+        _safe_geocode(listing.location)
 
 
 def _ensure_collection(config_path: Path, force: bool = False) -> bool:
@@ -107,7 +115,9 @@ def _run_scan(config_path: Path) -> None:
         config = load_config(config_path)
         result = run_once(config)
         # run_once가 내부에서 다시 수집하므로 캐시도 최신 스냅샷으로 맞춘다
-        _snapshot_cache[key] = collect_listings(config)
+        fresh = collect_listings(config)
+        _warm_match_coords(fresh.matched)
+        _snapshot_cache[key] = fresh
         _snapshot_fetched_at[key] = time.monotonic()
         print(f"[scan] 완료 — 수집 {result.fetched_count} / 신규 {len(result.notified)}")
     except Exception as error:  # noqa: BLE001
@@ -655,7 +665,9 @@ def _listing_to_dict(
     first_seen_at: str | None = None,
     with_coords: bool = True,
 ) -> dict[str, Any]:
-    coords = _safe_geocode(listing.location) if with_coords else None
+    # HTTP 응답 경로에서는 절대 동기 지오코딩하지 않는다 — 캐시된 좌표만 읽는다(없으면 None).
+    # 좌표 워밍은 백그라운드 수집(_warm_match_coords)이 담당한다.
+    coords = cached_coords(listing.location) if with_coords else None
     return {
         "identity": listing.identity,
         "source": listing.source,

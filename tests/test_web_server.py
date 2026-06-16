@@ -13,6 +13,12 @@ from realestate_alert.web_server import create_handler
 
 
 class WebServerTests(unittest.TestCase):
+    def setUp(self):
+        # 좌표 캐시는 모듈 전역이라 테스트 간 오염을 막기 위해 매번 비운다.
+        import realestate_alert.land_info as land_info
+
+        land_info._geocode_cache.clear()
+
     def test_api_listings_returns_matching_listings(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -32,6 +38,28 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(len(response["unmatched_listings"]), 1)
         self.assertEqual(response["unmatched_listings"][0]["external_id"], "miss")
         self.assertFalse(response["unmatched_listings"][0]["is_match"])
+
+    def test_listing_payload_never_blocks_on_geocoding(self):
+        """HTTP 응답 경로(_listing_to_dict)는 캐시된 좌표만 읽고 동기 지오코딩하지 않는다."""
+        from realestate_alert.web_server import _listing_to_dict
+        from realestate_alert.models import Listing
+        import realestate_alert.land_info as land_info
+
+        land_info._geocode_cache.clear()
+        listing = Listing(
+            source="onbid", external_id="x", title="[공매] 양천구 상가",
+            location="서울특별시 양천구 목동 1", deposit=0, monthly_rent=0,
+            area_m2=0.0, floor=None, premium=None, url="https://www.onbid.co.kr",
+        )
+        # 캐시에 없으면 네트워크 호출 없이 None
+        with mock.patch.object(land_info, "geocode_parcel", side_effect=AssertionError("동기 지오코딩 금지")):
+            without_cache = _listing_to_dict(listing, with_coords=True)
+        self.assertIsNone(without_cache["latitude"])
+        # 백그라운드가 캐시를 채워두면 그 값을 읽는다
+        land_info._geocode_cache[listing.location] = (37.5, 127.0)
+        with_cache = _listing_to_dict(listing, with_coords=True)
+        self.assertEqual(with_cache["latitude"], 37.5)
+        self.assertEqual(with_cache["longitude"], 127.0)
 
     def test_api_diagnostics_reports_key_presence_and_source_counts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
