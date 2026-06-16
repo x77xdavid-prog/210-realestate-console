@@ -32,6 +32,15 @@ _PARCEL_IN_NAME = re.compile(
 )
 
 
+def _first_int(text: str) -> int | None:
+    """문자열에서 첫 숫자(쉼표 포함)를 정수로 추출한다. 예: '최저 1,000,000원' → 1000000."""
+    match = re.search(r"[\d,]{2,}", text or "")
+    if not match:
+        return None
+    digits = match.group().replace(",", "")
+    return int(digits) if digits.isdigit() else None
+
+
 @dataclass
 class OnbidSource:
     """온비드 공매 중 지정 지역의 매각 물건을 매물 소스로 가져온다."""
@@ -139,6 +148,9 @@ def _listing_from_item(item: dict[str, Any]) -> Listing | None:
         url=ONBID_PORTAL_URL,
         property_type="land" if (building_area or 0) == 0 else "building",
         usage=usage or None,
+        appraisal_price=appraisal or None,
+        min_bid_price=_first_int(lowest_bid),
+        sale_date=end[:8] if len(end) >= 8 else None,
         land_area_m2=land_area,
         building_area_m2=building_area,
         buildable_note=" · ".join(note_parts),

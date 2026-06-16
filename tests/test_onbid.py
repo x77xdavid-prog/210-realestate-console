@@ -2,7 +2,18 @@ import json
 import unittest
 from unittest import mock
 
-from realestate_alert.onbid import OnbidSource
+from realestate_alert.onbid import OnbidSource, _first_int
+
+
+class FirstIntTests(unittest.TestCase):
+    def test_extracts_first_comma_number(self):
+        self.assertEqual(_first_int("최저 1,000,000원"), 1000000)
+        self.assertEqual(_first_int("100,000,000"), 100000000)
+
+    def test_returns_none_when_no_number(self):
+        self.assertIsNone(_first_int(""))
+        self.assertIsNone(_first_int("-"))
+        self.assertIsNone(_first_int(None))
 
 ONBID_JSON = json.dumps(
     {

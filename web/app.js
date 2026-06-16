@@ -162,6 +162,8 @@ const state = {
   regionFilter: "all",
   fitFilter: "all",
   fetchedPage: 1,
+  fetchedSort: "default",
+  halfOnly: false,
   hasServer: false,
   selectedListing: null,
   checklist: {
@@ -1009,6 +1011,7 @@ function listingCardHtml(listing) {
         <div><dt>대지</dt><dd>${formatArea(listing.land_area_m2)}</dd></div>
         <div><dt>층수 · 주차</dt><dd>${listing.floors_total ? `${listing.floors_total}층` : "-"} · ${listing.parking_spaces ?? "-"}대</dd></div>
       </dl>
+      ${auctionTagsHtml(listing)}
       <div class="card-pills">
         ${fitBadgeHtml(listing)}
         ${listing.is_match === false ? '<span class="status-pill risk">검색 조건 불일치</span>' : ""}
@@ -1053,20 +1056,15 @@ function renderFetchedTable() {
   let filtered = all;
   if (state.fitFilter !== "all") filtered = filtered.filter((item) => fitLevel(item) === state.fitFilter);
   if (state.regionFilter !== "all") filtered = filtered.filter((item) => regionOf(item.location) === state.regionFilter);
+  if (state.halfOnly) filtered = filtered.filter((item) => (discountPct(item) ?? 0) >= 50);
   if (filtered.length === 0) {
-    elements.boardGrid.innerHTML = '<div class="empty-state">조건에 맞는 수집 매물이 없습니다. 필터를 조정하세요.</div>';
+    elements.boardGrid.innerHTML =
+      `${fetchedToolbarHtml(0, 0, 0)}<div class="empty-state">조건에 맞는 수집 매물이 없습니다. 필터를 조정하세요.</div>`;
+    wireFetchedToolbar();
     return;
   }
 
-  // 소스 순 → 신규 우선으로 정렬한 뒤 24개씩 페이지로 나눠 카드 그리드로 보여준다.
-  const rank = (source) => {
-    const index = SOURCE_ORDER.indexOf(source);
-    return index === -1 ? SOURCE_ORDER.length : index;
-  };
-  const sorted = filtered
-    .slice()
-    .sort((a, b) => rank(a.source) - rank(b.source) || Number(Boolean(b.is_new)) - Number(Boolean(a.is_new)));
-
+  const sorted = sortFetched(filtered, state.fetchedSort);
   const pageSize = 24;
   const pageCount = Math.ceil(sorted.length / pageSize);
   const page = Math.min(Math.max(1, state.fetchedPage), pageCount);
@@ -1074,10 +1072,11 @@ function renderFetchedTable() {
   const start = (page - 1) * pageSize;
   const slice = sorted.slice(start, start + pageSize);
 
-  const info = `<div class="collect-info">${sorted.length}건 중 ${start + 1}–${Math.min(start + pageSize, sorted.length)} 표시</div>`;
+  const toolbar = fetchedToolbarHtml(sorted.length, start + 1, Math.min(start + pageSize, sorted.length));
   const cards = `<div class="collect-grid">${slice.map(collectCardHtml).join("")}</div>`;
-  elements.boardGrid.innerHTML = info + cards + paginationHtml(page, pageCount);
+  elements.boardGrid.innerHTML = toolbar + cards + paginationHtml(page, pageCount);
 
+  wireFetchedToolbar();
   elements.boardGrid.querySelectorAll("[data-page]").forEach((button) => {
     button.addEventListener("click", () => {
       state.fetchedPage = Number(button.dataset.page);
@@ -1085,6 +1084,104 @@ function renderFetchedTable() {
       document.querySelector("#board").scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
+}
+
+const SORT_OPTIONS = [
+  { key: "default", label: "기본 정렬" },
+  { key: "discount", label: "할인율 높은순" },
+  { key: "dday", label: "마감 임박순" },
+  { key: "fail", label: "유찰 많은순" },
+];
+
+function fetchedToolbarHtml(total, from, to) {
+  const info = total ? `${total}건 중 ${from}–${to} 표시` : "0건";
+  const options = SORT_OPTIONS.map(
+    (o) => `<option value="${o.key}"${state.fetchedSort === o.key ? " selected" : ""}>${o.label}</option>`,
+  ).join("");
+  return `
+    <div class="collect-toolbar">
+      <span class="collect-info">${info}</span>
+      <span class="collect-controls">
+        <button type="button" class="theme-toggle${state.halfOnly ? " active" : ""}" data-half-toggle>🔻 반값 50%↓</button>
+        <select class="collect-sort" data-sort aria-label="정렬">${options}</select>
+      </span>
+    </div>`;
+}
+
+function wireFetchedToolbar() {
+  const toggle = elements.boardGrid.querySelector("[data-half-toggle]");
+  if (toggle) {
+    toggle.addEventListener("click", () => {
+      state.halfOnly = !state.halfOnly;
+      state.fetchedPage = 1;
+      renderBoard();
+    });
+  }
+  const sort = elements.boardGrid.querySelector("[data-sort]");
+  if (sort) {
+    sort.addEventListener("change", () => {
+      state.fetchedSort = sort.value;
+      state.fetchedPage = 1;
+      renderBoard();
+    });
+  }
+}
+
+function discountPct(listing) {
+  const appraisal = listing.appraisal_price;
+  const minBid = listing.min_bid_price;
+  if (!appraisal || !minBid || appraisal <= 0) return null;
+  return Math.round((1 - minBid / appraisal) * 100);
+}
+
+function saleDays(saleDate) {
+  if (!saleDate || String(saleDate).length !== 8) return null;
+  const s = String(saleDate);
+  const target = new Date(Number(s.slice(0, 4)), Number(s.slice(4, 6)) - 1, Number(s.slice(6, 8)));
+  if (Number.isNaN(target.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target - today) / 86400000);
+}
+
+function ddayText(saleDate) {
+  const days = saleDays(saleDate);
+  if (days === null || days < 0) return "";
+  return days === 0 ? "D-day" : `D-${days}`;
+}
+
+function auctionTagsHtml(listing) {
+  const tags = [];
+  const discount = discountPct(listing);
+  if (discount !== null && discount > 0) tags.push(`<span class="atag save">${discount}%↓</span>`);
+  const dday = ddayText(listing.sale_date);
+  if (dday) tags.push(`<span class="atag dday">${dday}</span>`);
+  if (listing.fail_count) tags.push(`<span class="atag warn">유찰 ${listing.fail_count}</span>`);
+  return tags.length ? `<div class="atags">${tags.join("")}</div>` : "";
+}
+
+function sortFetched(list, sortKey) {
+  const arr = list.slice();
+  if (sortKey === "discount") {
+    return arr.sort((a, b) => (discountPct(b) ?? -1) - (discountPct(a) ?? -1));
+  }
+  if (sortKey === "dday") {
+    const days = (item) => {
+      const d = saleDays(item.sale_date);
+      return d === null || d < 0 ? 99999 : d;
+    };
+    return arr.sort((a, b) => days(a) - days(b));
+  }
+  if (sortKey === "fail") {
+    return arr.sort((a, b) => (b.fail_count ?? 0) - (a.fail_count ?? 0));
+  }
+  const rank = (source) => {
+    const index = SOURCE_ORDER.indexOf(source);
+    return index === -1 ? SOURCE_ORDER.length : index;
+  };
+  return arr.sort(
+    (a, b) => rank(a.source) - rank(b.source) || Number(Boolean(b.is_new)) - Number(Boolean(a.is_new)),
+  );
 }
 
 function paginationHtml(page, pageCount) {
@@ -1125,6 +1222,7 @@ function collectCardHtml(listing) {
       </div>
       <h4 class="cc-title">${newBadge}${escapeHtml(listing.title)}</h4>
       <p class="cc-loc">${escapeHtml(listing.location)}</p>
+      ${auctionTagsHtml(listing)}
       ${area ? `<p class="cc-area">${area}</p>` : ""}
       ${note ? `<p class="cc-note">${note}</p>` : ""}
       <div class="cc-actions">

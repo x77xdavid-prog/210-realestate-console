@@ -100,6 +100,11 @@ class CourtAuctionTests(unittest.TestCase):
         self.assertEqual(listing.deposit, 1100000000)  # 최저매각가
         self.assertIn("감정가", listing.buildable_note)
         self.assertIn("유찰 2회", listing.buildable_note)
+        # A2 구조화 필드 — 할인율%·D-day·유찰 표시에 사용
+        self.assertEqual(listing.appraisal_price, 1456760000)
+        self.assertEqual(listing.min_bid_price, 1100000000)
+        self.assertEqual(listing.fail_count, 2)
+        self.assertEqual(listing.sale_date, "20260701")
 
     def test_fetch_handles_empty_and_error(self):
         empty = CourtAuctionSource(fetcher=lambda body: _result([]))

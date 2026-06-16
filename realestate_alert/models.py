@@ -17,6 +17,10 @@ class Listing:
     url: str
     property_type: str | None = None
     usage: str | None = None
+    appraisal_price: int | None = None
+    min_bid_price: int | None = None
+    fail_count: int | None = None
+    sale_date: str | None = None
     land_area_m2: float | None = None
     building_area_m2: float | None = None
     floors_total: int | None = None
