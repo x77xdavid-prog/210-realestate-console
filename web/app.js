@@ -161,6 +161,7 @@ const state = {
   boardFilter: "all",
   regionFilter: "all",
   fitFilter: "all",
+  fetchedPage: 1,
   hasServer: false,
   selectedListing: null,
   checklist: {
@@ -933,6 +934,8 @@ function renderBoard() {
   const isFetched = state.boardFilter === "fetched";
   elements.fitFilter.hidden = !isFetched;
   elements.regionFilter.hidden = !isFetched;
+  // 수집 전체는 카드 그리드를 직접 그리므로 board-grid 자체는 블록으로 둔다.
+  elements.boardGrid.classList.toggle("plain", isFetched);
 
   if (state.boardFilter === "fit") {
     renderFitBoard();
@@ -1055,26 +1058,81 @@ function renderFetchedTable() {
     return;
   }
 
-  const groups = new Map();
-  for (const item of filtered) {
-    if (!groups.has(item.source)) groups.set(item.source, []);
-    groups.get(item.source).push(item);
-  }
-  const orderedKeys = sortByOrder([...groups.keys()], SOURCE_ORDER);
+  // 소스 순 → 신규 우선으로 정렬한 뒤 24개씩 페이지로 나눠 카드 그리드로 보여준다.
+  const rank = (source) => {
+    const index = SOURCE_ORDER.indexOf(source);
+    return index === -1 ? SOURCE_ORDER.length : index;
+  };
+  const sorted = filtered
+    .slice()
+    .sort((a, b) => rank(a.source) - rank(b.source) || Number(Boolean(b.is_new)) - Number(Boolean(a.is_new)));
 
-  const head =
-    "<thead><tr><th>적합도</th><th>유형</th><th>제목</th><th>위치</th><th>전용/대지</th>" +
-    "<th>층·주차</th><th>조건</th><th>메모</th><th>링크</th></tr></thead>";
-  const bodies = orderedKeys
-    .map((key) => {
-      const rows = sortNewFirst(groups.get(key));
-      const header = `<tr class="collect-group-head"><td colspan="9">${escapeHtml(
-        sourceLabel(key),
-      )} <span class="chip-count">${rows.length}</span></td></tr>`;
-      return `<tbody>${header}${rows.map(collectRowHtml).join("")}</tbody>`;
-    })
-    .join("");
-  elements.boardGrid.innerHTML = `<div class="table-wrap collect-table-wrap"><table class="collect-table">${head}${bodies}</table></div>`;
+  const pageSize = 24;
+  const pageCount = Math.ceil(sorted.length / pageSize);
+  const page = Math.min(Math.max(1, state.fetchedPage), pageCount);
+  state.fetchedPage = page;
+  const start = (page - 1) * pageSize;
+  const slice = sorted.slice(start, start + pageSize);
+
+  const info = `<div class="collect-info">${sorted.length}건 중 ${start + 1}–${Math.min(start + pageSize, sorted.length)} 표시</div>`;
+  const cards = `<div class="collect-grid">${slice.map(collectCardHtml).join("")}</div>`;
+  elements.boardGrid.innerHTML = info + cards + paginationHtml(page, pageCount);
+
+  elements.boardGrid.querySelectorAll("[data-page]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.fetchedPage = Number(button.dataset.page);
+      renderBoard();
+      document.querySelector("#board").scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+}
+
+function paginationHtml(page, pageCount) {
+  if (pageCount <= 1) return "";
+  const item = (p, label, active) =>
+    `<button type="button" class="pg-btn${active ? " active" : ""}" data-page="${p}">${label ?? p}</button>`;
+  const parts = [item(Math.max(1, page - 1), "‹", false)];
+  const visible = new Set([1, pageCount, page, page - 1, page + 1, page - 2, page + 2]);
+  let last = 0;
+  for (let p = 1; p <= pageCount; p += 1) {
+    if (!visible.has(p)) continue;
+    if (p - last > 1) parts.push('<span class="pg-gap">…</span>');
+    parts.push(item(p, null, p === page));
+    last = p;
+  }
+  parts.push(item(Math.min(pageCount, page + 1), "›", false));
+  return `<div class="pagination">${parts.join("")}</div>`;
+}
+
+function collectCardHtml(listing) {
+  const identity = identityOf(listing);
+  const isLand = listing.property_type === "land" || listing.floor === "토지/건물";
+  const inLedger = state.ledger.has(identity);
+  const newBadge = listing.is_new ? '<span class="badge-new">NEW</span> ' : "";
+  const area = listing.area_m2
+    ? formatArea(listing.area_m2)
+    : listing.land_area_m2
+      ? formatArea(listing.land_area_m2)
+      : "";
+  const note = listing.buildable_note ? escapeHtml(listing.buildable_note) : "";
+  return `
+    <article class="collect-card" data-card-identity="${escapeHtml(identity)}" title="클릭하면 상세(지도)로 이동">
+      <div class="cc-top">
+        ${fitBadgeHtml(listing)}
+        <span class="spacer"></span>
+        <span class="type-chip">${isLand ? "토지" : "건물"}</span>
+        <span class="cc-src">${escapeHtml(sourceLabel(listing.source))}</span>
+      </div>
+      <h4 class="cc-title">${newBadge}${escapeHtml(listing.title)}</h4>
+      <p class="cc-loc">${escapeHtml(listing.location)}</p>
+      ${area ? `<p class="cc-area">${area}</p>` : ""}
+      ${note ? `<p class="cc-note">${note}</p>` : ""}
+      <div class="cc-actions">
+        <a class="button secondary compact" href="${escapeHtml(naverLandUrl(listing))}" target="_blank" rel="noreferrer">네이버</a>
+        <button type="button" class="button secondary compact" data-action="map" data-identity="${escapeHtml(identity)}">지도</button>
+        <button type="button" class="button ${inLedger ? "secondary" : "primary"} compact" data-action="ledger" data-identity="${escapeHtml(identity)}">${inLedger ? "매물장 ✓" : "매물장"}</button>
+      </div>
+    </article>`;
 }
 
 const FIT_CHIPS = [
@@ -1109,6 +1167,7 @@ function renderFitChips(all) {
   elements.fitFilter.querySelectorAll("[data-fit]").forEach((button) => {
     button.addEventListener("click", () => {
       state.fitFilter = button.dataset.fit;
+      state.fetchedPage = 1;
       renderBoard();
     });
   });
@@ -1127,41 +1186,10 @@ function renderRegionChips(regions) {
   elements.regionFilter.querySelectorAll("[data-region]").forEach((button) => {
     button.addEventListener("click", () => {
       state.regionFilter = button.dataset.region;
+      state.fetchedPage = 1;
       renderBoard();
     });
   });
-}
-
-function collectRowHtml(listing) {
-  const identity = identityOf(listing);
-  const isLand = listing.property_type === "land" || listing.floor === "토지/건물";
-  const inLedger = state.ledger.has(identity);
-  const newBadge = listing.is_new ? '<span class="badge-new">NEW</span> ' : "";
-  const matchBadge =
-    listing.is_match === false
-      ? '<span class="status-pill risk">불일치</span>'
-      : '<span class="status-pill ok">일치</span>';
-  const area = listing.area_m2 ? formatArea(listing.area_m2) : "-";
-  const land = listing.land_area_m2 ? formatArea(listing.land_area_m2) : "-";
-  const floorsParking = `${listing.floors_total ? `${listing.floors_total}층` : "-"} · ${
-    listing.parking_spaces ?? "-"
-  }대`;
-  return `
-    <tr data-row-identity="${escapeHtml(identity)}">
-      <td>${fitBadgeHtml(listing)}</td>
-      <td><span class="type-chip">${isLand ? "토지" : "건물"}</span></td>
-      <td class="collect-title">${newBadge}${escapeHtml(listing.title)}</td>
-      <td>${escapeHtml(listing.location)}</td>
-      <td class="collect-area">${area}<br /><span>${land}</span></td>
-      <td>${floorsParking}</td>
-      <td>${matchBadge}</td>
-      <td class="collect-note">${escapeHtml(listing.buildable_note ?? "-")}</td>
-      <td class="collect-links">
-        <a class="button secondary compact" href="${escapeHtml(naverLandUrl(listing))}" target="_blank" rel="noreferrer">네이버</a>
-        <button type="button" class="button secondary compact" data-action="map" data-identity="${escapeHtml(identity)}">지도</button>
-        <button type="button" class="button ${inLedger ? "secondary" : "primary"} compact" data-action="ledger" data-identity="${escapeHtml(identity)}">${inLedger ? "장 ✓" : "장 +"}</button>
-      </td>
-    </tr>`;
 }
 
 function handleCardAction(action, listing) {
@@ -2694,6 +2722,7 @@ document.querySelector("#financeForm").addEventListener("input", calculateEstima
 
 function setBoardFilter(filter) {
   state.boardFilter = filter;
+  state.fetchedPage = 1;
   document.querySelectorAll("[data-board-filter]").forEach((item) => {
     item.classList.toggle("active", item.dataset.boardFilter === filter);
   });
