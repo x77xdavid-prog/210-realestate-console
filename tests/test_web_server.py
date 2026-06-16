@@ -33,6 +33,44 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(response["unmatched_listings"][0]["external_id"], "miss")
         self.assertFalse(response["unmatched_listings"][0]["is_match"])
 
+    def test_api_diagnostics_reports_key_presence_and_source_counts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                # 진단 엔드포인트는 좌표 변환을 하지 않으므로 geocode 캐시를 더럽히지 않는다.
+                with mock.patch.dict(
+                    "os.environ",
+                    {"DATA_GO_KR_API_KEY": "x" * 10},
+                    clear=False,
+                ):
+                    diag = _diagnostics_when_ready(server)
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertTrue(diag["keys"]["DATA_GO_KR_API_KEY"])
+        self.assertEqual(diag["fetched_count"], 2)
+        self.assertEqual(diag["source_counts"].get("manual"), 2)
+
+    def test_api_diagnostics_flags_missing_key(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            clean_env = {k: v for k, v in os.environ.items()
+                         if k not in ("DATA_GO_KR_API_KEY", "VWORLD_API_KEY")}
+            try:
+                with mock.patch.dict("os.environ", clean_env, clear=True):
+                    diag = _request_json(server, "GET", "/api/diagnostics")
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertFalse(diag["keys"]["DATA_GO_KR_API_KEY"])
+        self.assertFalse(diag["keys"]["VWORLD_API_KEY"])
+
     def test_api_scan_triggers_background_collection(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -424,6 +462,19 @@ class DocumentApiTests(unittest.TestCase):
             finally:
                 server.shutdown()
                 server.server_close()
+
+
+def _diagnostics_when_ready(server: ThreadingHTTPServer, attempts: int = 50) -> dict:
+    """진단 엔드포인트를 수집 완료까지 폴링한다 (좌표 변환 없이 캐시만 채운다)."""
+    import time as _time
+
+    response = _request_json(server, "GET", "/api/diagnostics")
+    for _ in range(attempts):
+        if response.get("fetched_count", 0) > 0:
+            return response
+        _time.sleep(0.05)
+        response = _request_json(server, "GET", "/api/diagnostics")
+    return response
 
 
 def _listings_when_ready(server: ThreadingHTTPServer, attempts: int = 50) -> dict:

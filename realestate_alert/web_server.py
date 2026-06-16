@@ -137,6 +137,9 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
             if self.path == "/api/listings":
                 self._send_json(_listings_payload(config_path))
                 return
+            if self.path == "/api/diagnostics":
+                self._send_json(_diagnostics_payload(config_path))
+                return
             if self.path.startswith("/api/geocode"):
                 query = parse_qs(urlparse(self.path).query)
                 address = (query.get("address") or [""])[0].strip()
@@ -581,6 +584,30 @@ def _safe_geocode(location: str) -> tuple[float, float] | None:
         return geocode_parcel(location)
     except PublicDataError:
         return None
+
+
+def _diagnostics_payload(config_path: Path) -> dict[str, Any]:
+    """공공 API 키 설정 여부와 소스별 수집 현황을 보여준다 (키 값 자체는 노출하지 않음).
+
+    클라우드에서 '검색이 안 된다'는 대부분 환경변수 미설정이라, 화면에서 바로
+    확인할 수 있도록 키 존재 여부(bool)와 마지막 수집 결과를 반환한다.
+    """
+    snapshot = _cached_snapshot(config_path)
+    source_counts: dict[str, int] = {}
+    for listing in snapshot.fetched:
+        source_counts[listing.source] = source_counts.get(listing.source, 0) + 1
+    fetched_at = _snapshot_fetched_at.get(str(config_path))
+    return {
+        "keys": {
+            "DATA_GO_KR_API_KEY": bool(os.environ.get("DATA_GO_KR_API_KEY", "").strip()),
+            "VWORLD_API_KEY": bool(os.environ.get("VWORLD_API_KEY", "").strip()),
+        },
+        "fetched_count": snapshot.fetched_count,
+        "matched_count": snapshot.matched_count,
+        "source_counts": source_counts,
+        "collecting": str(config_path) in _collecting,
+        "has_snapshot": fetched_at is not None,
+    }
 
 
 def _listings_payload(config_path: Path) -> dict[str, Any]:
