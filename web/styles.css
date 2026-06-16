@@ -1106,6 +1106,71 @@ td span {
   font-size: 0.76rem;
 }
 
+/* ===== 수집 전체 — 소스별 컴팩트 표 ===== */
+.board-subfilter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 2px;
+}
+
+.collect-table-wrap {
+  margin-top: 12px;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.collect-table {
+  font-size: 0.82rem;
+}
+
+.collect-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.collect-table td {
+  padding: 10px 14px;
+  vertical-align: top;
+}
+
+.collect-group-head td {
+  background: rgba(14, 116, 144, 0.09);
+  color: var(--ink);
+  font-weight: 800;
+  font-size: 0.8rem;
+}
+
+.collect-title {
+  font-weight: 700;
+  color: var(--ink);
+  max-width: 260px;
+}
+
+.collect-area span {
+  color: var(--ink-faint);
+}
+
+.collect-note {
+  max-width: 320px;
+  white-space: normal;
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.collect-links {
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.collect-links .button.compact {
+  padding: 6px 10px;
+  font-size: 0.73rem;
+}
+
 .ledger-status-select {
   min-width: 110px;
   padding: 8px 10px;

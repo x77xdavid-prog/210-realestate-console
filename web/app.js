@@ -108,6 +108,7 @@ const elements = {
   newCount: document.querySelector("#newCount"),
   favoriteCount: document.querySelector("#favoriteCount"),
   boardGrid: document.querySelector("#boardGrid"),
+  regionFilter: document.querySelector("#regionFilter"),
   ledgerRows: document.querySelector("#ledgerRows"),
   ledgerSummary: document.querySelector("#ledgerSummary"),
   priorityList: document.querySelector("#priorityList"),
@@ -157,6 +158,7 @@ const state = {
   favorites: new Map(),
   ledger: new Map(),
   boardFilter: "all",
+  regionFilter: "all",
   hasServer: false,
   selectedListing: null,
   checklist: {
@@ -925,8 +927,13 @@ function renderBoard() {
   document.querySelector("#countFetched").textContent = all.length + state.unmatched.length;
   document.querySelector("#countFit").textContent = fitGroups().met.length;
 
+  // '수집 전체'는 수백 건이라 3D 카드 대신 소스별 컴팩트 표로 보여준다(빠르게 뜨고 한눈에).
+  elements.regionFilter.hidden = state.boardFilter !== "fetched";
+
   if (state.boardFilter === "fit") {
     renderFitBoard();
+  } else if (state.boardFilter === "fetched") {
+    renderFetchedTable();
   } else {
     const visible = sortNewFirst(boardListings());
     if (visible.length === 0) {
@@ -934,7 +941,6 @@ function renderBoard() {
         all: "조건에 맞는 매물이 없습니다. 스캔을 실행하거나 검색 조건을 조정하세요.",
         new: "최근 발견된 신규 매물이 없습니다.",
         favorite: "관심매물이 비어 있습니다. 카드의 ♥ 버튼으로 추가하세요.",
-        fetched: "수집된 매물이 없습니다. 스캔을 실행하세요.",
       };
       elements.boardGrid.innerHTML = `<div class="empty-state">${messages[state.boardFilter]}</div>`;
       return;
@@ -1010,6 +1016,107 @@ function listingCardHtml(listing) {
       </div>
     </article>
   `;
+}
+
+/* ===== 수집 전체 — 소스별 컴팩트 표 (수백 건을 한눈에) ===== */
+
+const REGION_ORDER = ["양천구", "강서구", "구로구", "영등포구"];
+const SOURCE_ORDER = ["onbid", "court", "lh", "manual", "naver", "json_file"];
+
+function regionOf(location) {
+  const match = String(location || "").match(/(\S+?[구군])(?:\s|$)/);
+  return match ? match[1] : "기타";
+}
+
+function sortByOrder(values, order) {
+  const rank = (value) => {
+    const index = order.indexOf(value);
+    return index === -1 ? order.length : index;
+  };
+  return [...values].sort((a, b) => rank(a) - rank(b) || String(a).localeCompare(String(b)));
+}
+
+function renderFetchedTable() {
+  const all = [...state.listings, ...state.unmatched];
+  const regions = sortByOrder([...new Set(all.map((item) => regionOf(item.location)))], REGION_ORDER);
+  renderRegionChips(regions);
+
+  const region = state.regionFilter;
+  const filtered = region === "all" ? all : all.filter((item) => regionOf(item.location) === region);
+  if (filtered.length === 0) {
+    elements.boardGrid.innerHTML = '<div class="empty-state">해당 지역에 수집된 매물이 없습니다.</div>';
+    return;
+  }
+
+  const groups = new Map();
+  for (const item of filtered) {
+    if (!groups.has(item.source)) groups.set(item.source, []);
+    groups.get(item.source).push(item);
+  }
+  const orderedKeys = sortByOrder([...groups.keys()], SOURCE_ORDER);
+
+  const head =
+    "<thead><tr><th>유형</th><th>제목</th><th>위치</th><th>전용/대지</th>" +
+    "<th>층·주차</th><th>조건</th><th>메모</th><th>링크</th></tr></thead>";
+  const bodies = orderedKeys
+    .map((key) => {
+      const rows = sortNewFirst(groups.get(key));
+      const header = `<tr class="collect-group-head"><td colspan="8">${escapeHtml(
+        sourceLabel(key),
+      )} <span class="chip-count">${rows.length}</span></td></tr>`;
+      return `<tbody>${header}${rows.map(collectRowHtml).join("")}</tbody>`;
+    })
+    .join("");
+  elements.boardGrid.innerHTML = `<div class="table-wrap collect-table-wrap"><table class="collect-table">${head}${bodies}</table></div>`;
+}
+
+function renderRegionChips(regions) {
+  const chip = (value, label, count) =>
+    `<button type="button" class="filter-chip${state.regionFilter === value ? " active" : ""}" data-region="${escapeHtml(value)}">${escapeHtml(label)} <span class="chip-count">${count}</span></button>`;
+  const all = [...state.listings, ...state.unmatched];
+  const parts = [chip("all", "전체 지역", all.length)];
+  for (const region of regions) {
+    const count = all.filter((item) => regionOf(item.location) === region).length;
+    parts.push(chip(region, region, count));
+  }
+  elements.regionFilter.innerHTML = parts.join("");
+  elements.regionFilter.querySelectorAll("[data-region]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.regionFilter = button.dataset.region;
+      renderBoard();
+    });
+  });
+}
+
+function collectRowHtml(listing) {
+  const identity = identityOf(listing);
+  const isLand = listing.property_type === "land" || listing.floor === "토지/건물";
+  const inLedger = state.ledger.has(identity);
+  const newBadge = listing.is_new ? '<span class="badge-new">NEW</span> ' : "";
+  const matchBadge =
+    listing.is_match === false
+      ? '<span class="status-pill risk">불일치</span>'
+      : '<span class="status-pill ok">일치</span>';
+  const area = listing.area_m2 ? formatArea(listing.area_m2) : "-";
+  const land = listing.land_area_m2 ? formatArea(listing.land_area_m2) : "-";
+  const floorsParking = `${listing.floors_total ? `${listing.floors_total}층` : "-"} · ${
+    listing.parking_spaces ?? "-"
+  }대`;
+  return `
+    <tr data-row-identity="${escapeHtml(identity)}">
+      <td><span class="type-chip">${isLand ? "토지" : "건물"}</span></td>
+      <td class="collect-title">${newBadge}${escapeHtml(listing.title)}</td>
+      <td>${escapeHtml(listing.location)}</td>
+      <td class="collect-area">${area}<br /><span>${land}</span></td>
+      <td>${floorsParking}</td>
+      <td>${matchBadge}</td>
+      <td class="collect-note">${escapeHtml(listing.buildable_note ?? "-")}</td>
+      <td class="collect-links">
+        <a class="button secondary compact" href="${escapeHtml(naverLandUrl(listing))}" target="_blank" rel="noreferrer">네이버</a>
+        <button type="button" class="button secondary compact" data-action="map" data-identity="${escapeHtml(identity)}">지도</button>
+        <button type="button" class="button ${inLedger ? "secondary" : "primary"} compact" data-action="ledger" data-identity="${escapeHtml(identity)}">${inLedger ? "장 ✓" : "장 +"}</button>
+      </td>
+    </tr>`;
 }
 
 function handleCardAction(action, listing) {
