@@ -18,6 +18,7 @@
         </div>
         <nav class="nav-list" aria-label="대시보드 섹션">
           <a href="#overview" class="nav-link active">현황</a>
+          <a href="#schedulePanel" class="nav-link">경매일정</a>
           <a href="#board" class="nav-link">매물 보드</a>
           <a href="#ledger" class="nav-link">매물장</a>
           <a href="#map" class="nav-link">지도</a>
@@ -101,6 +102,17 @@
             <strong id="favoriteCount" data-count>0</strong>
             <span class="metric-caption">검토 후보 보관함</span>
           </article>
+        </section>
+
+        <section class="panel schedule-panel reveal" id="schedulePanel" hidden aria-labelledby="scheduleTitle">
+          <div class="panel-heading row-heading">
+            <div>
+              <p class="section-kicker">Auction Schedule</p>
+              <h2 id="scheduleTitle">다가오는 매각기일</h2>
+            </div>
+            <span class="status-pill neutral">날짜를 누르면 그날 입찰 매물만 표시</span>
+          </div>
+          <div class="schedule-strip" id="scheduleStrip"></div>
         </section>
 
         <section class="content-grid reveal">
@@ -524,6 +536,6 @@
         <div class="checklist-sections" id="checklistSections"></div>
       </div>
     </dialog>
-    <script type="module" src="app.js?v=20260616h"></script>
+    <script type="module" src="app.js?v=20260616i"></script>
   </body>
 </html>

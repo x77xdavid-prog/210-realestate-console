@@ -115,6 +115,8 @@ const elements = {
   priceMax: document.querySelector("#priceMax"),
   areaMin: document.querySelector("#areaMin"),
   areaMax: document.querySelector("#areaMax"),
+  schedulePanel: document.querySelector("#schedulePanel"),
+  scheduleStrip: document.querySelector("#scheduleStrip"),
   ledgerRows: document.querySelector("#ledgerRows"),
   ledgerSummary: document.querySelector("#ledgerSummary"),
   priorityList: document.querySelector("#priorityList"),
@@ -173,6 +175,7 @@ const state = {
   priceMax: null,
   areaMin: null,
   areaMax: null,
+  dateFilter: null,
   hasServer: false,
   selectedListing: null,
   checklist: {
@@ -813,6 +816,7 @@ function renderFitBoard() {
 function renderDashboard() {
   renderScanProgress();
   renderMetrics();
+  renderSchedule();
   renderNewBanner();
   renderBoard();
   renderLedger();
@@ -1067,6 +1071,7 @@ function renderFetchedTable() {
   if (state.fitFilter !== "all") filtered = filtered.filter((item) => fitLevel(item) === state.fitFilter);
   if (state.regionFilter !== "all") filtered = filtered.filter((item) => regionOf(item.location) === state.regionFilter);
   if (state.halfOnly) filtered = filtered.filter((item) => (discountPct(item) ?? 0) >= 50);
+  if (state.dateFilter) filtered = filtered.filter((item) => item.sale_date === state.dateFilter);
   filtered = filtered.filter(inPriceRange).filter(inAreaRange);
   if (filtered.length === 0) {
     elements.boardGrid.innerHTML =
@@ -1109,10 +1114,14 @@ function fetchedToolbarHtml(total, from, to) {
   const options = SORT_OPTIONS.map(
     (o) => `<option value="${o.key}"${state.fetchedSort === o.key ? " selected" : ""}>${o.label}</option>`,
   ).join("");
+  const dateChip = state.dateFilter
+    ? `<button type="button" class="theme-toggle active" data-date-clear>매각기일 ${saleDateLabel(state.dateFilter)} ✕</button>`
+    : "";
   return `
     <div class="collect-toolbar">
       <span class="collect-info">${info}</span>
       <span class="collect-controls">
+        ${dateChip}
         <button type="button" class="theme-toggle${state.halfOnly ? " active" : ""}" data-half-toggle>🔻 반값 50%↓</button>
         <select class="collect-sort" data-sort aria-label="정렬">${options}</select>
       </span>
@@ -1134,6 +1143,14 @@ function wireFetchedToolbar() {
       state.fetchedSort = sort.value;
       state.fetchedPage = 1;
       renderBoard();
+    });
+  }
+  const dateClear = elements.boardGrid.querySelector("[data-date-clear]");
+  if (dateClear) {
+    dateClear.addEventListener("click", () => {
+      state.dateFilter = null;
+      state.fetchedPage = 1;
+      renderDashboard();
     });
   }
 }
@@ -1169,6 +1186,68 @@ function auctionTagsHtml(listing) {
   if (dday) tags.push(`<span class="atag dday">${dday}</span>`);
   if (listing.fail_count) tags.push(`<span class="atag warn">유찰 ${listing.fail_count}</span>`);
   return tags.length ? `<div class="atags">${tags.join("")}</div>` : "";
+}
+
+const DOW_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
+
+function parseSaleDate(saleDate) {
+  const s = String(saleDate || "");
+  if (s.length !== 8) return null;
+  const d = new Date(Number(s.slice(0, 4)), Number(s.slice(4, 6)) - 1, Number(s.slice(6, 8)));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function saleDateLabel(saleDate) {
+  const d = parseSaleDate(saleDate);
+  return d ? `${d.getMonth() + 1}/${d.getDate()}` : "";
+}
+
+function renderSchedule() {
+  const all = [...state.listings, ...state.unmatched];
+  const byDate = new Map();
+  for (const listing of all) {
+    const sd = listing.sale_date;
+    const days = saleDays(sd);
+    if (days === null || days < 0) continue; // 지난 기일 제외
+    if (!byDate.has(sd)) byDate.set(sd, { total: 0, fit: 0 });
+    const entry = byDate.get(sd);
+    entry.total += 1;
+    if (fitLevel(listing) === "open" || fitLevel(listing) === "build") entry.fit += 1;
+  }
+  const dates = [...byDate.keys()].sort().slice(0, 21);
+  if (dates.length === 0) {
+    elements.schedulePanel.hidden = true;
+    return;
+  }
+  elements.schedulePanel.hidden = false;
+  elements.scheduleStrip.innerHTML = dates
+    .map((sd) => {
+      const entry = byDate.get(sd);
+      const days = saleDays(sd);
+      const d = parseSaleDate(sd);
+      const dow = days === 0 ? "오늘" : DOW_LABELS[d.getDay()];
+      const cls = (days === 0 ? " today" : "") + (state.dateFilter === sd ? " active" : "");
+      const fit = entry.fit ? `<span class="sched-fit">병원 ${entry.fit}</span>` : "";
+      return `<button type="button" class="sched-chip${cls}" data-date="${sd}">
+        <span class="sched-date">${saleDateLabel(sd)}</span>
+        <span class="sched-dow">${dow}</span>
+        <span class="sched-count">${entry.total}건</span>
+        ${fit}
+      </button>`;
+    })
+    .join("");
+  elements.scheduleStrip.querySelectorAll("[data-date]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.dateFilter = state.dateFilter === button.dataset.date ? null : button.dataset.date;
+      state.boardFilter = "fetched";
+      state.fetchedPage = 1;
+      document.querySelectorAll("[data-board-filter]").forEach((item) => {
+        item.classList.toggle("active", item.dataset.boardFilter === "fetched");
+      });
+      renderDashboard();
+      document.querySelector("#board").scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
 }
 
 function inPriceRange(listing) {
@@ -2849,6 +2928,7 @@ document.querySelector("#financeForm").addEventListener("input", calculateEstima
 function setBoardFilter(filter) {
   state.boardFilter = filter;
   state.fetchedPage = 1;
+  state.dateFilter = null;
   document.querySelectorAll("[data-board-filter]").forEach((item) => {
     item.classList.toggle("active", item.dataset.boardFilter === filter);
   });

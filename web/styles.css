@@ -1106,6 +1106,87 @@ td span {
   font-size: 0.76rem;
 }
 
+/* ===== 경매일정 — 다가오는 매각기일 스트립 ===== */
+.schedule-strip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 4px 2px 8px;
+}
+
+.sched-chip {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 76px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  cursor: pointer;
+  transition: transform 0.2s var(--ease-out), box-shadow 0.2s, border-color 0.2s;
+}
+
+.sched-chip:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-float);
+  border-color: rgba(14, 116, 144, 0.35);
+}
+
+.sched-chip .sched-date {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.sched-chip .sched-dow {
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+}
+
+.sched-chip .sched-count {
+  margin-top: 2px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.sched-chip .sched-fit {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--teal);
+  background: var(--teal-soft);
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+
+.sched-chip.today {
+  border-color: rgba(14, 116, 144, 0.5);
+}
+
+.sched-chip.today .sched-dow {
+  color: var(--teal);
+  font-weight: 800;
+}
+
+.sched-chip.active {
+  background: linear-gradient(135deg, var(--navy) 0%, var(--teal) 90%);
+  border-color: transparent;
+}
+
+.sched-chip.active .sched-date,
+.sched-chip.active .sched-dow,
+.sched-chip.active .sched-count {
+  color: #ffffff;
+}
+
+.sched-chip.active .sched-fit {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+}
+
 /* ===== 병원 적합도 배지 ===== */
 .fit-pill {
   display: inline-flex;
