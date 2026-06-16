@@ -833,9 +833,13 @@ function renderScanProgress() {
     elements.scanProgressCount.textContent = `${progress.geocoded}/${progress.geocode_total}`;
     setProgressBar(progress.geocode_total ? progress.geocoded / progress.geocode_total : 1);
   } else {
-    elements.scanProgressTitle.textContent = "매물 수집 중…";
+    const done = progress.sources_done ?? 0;
+    const total = progress.sources_total ?? 0;
+    elements.scanProgressTitle.textContent = total
+      ? `매물 수집 중… (${done}/${total} 소스)`
+      : "매물 수집 중…";
     elements.scanProgressCount.textContent = `${progress.fetched}건`;
-    setProgressBar(progress.sources_total ? progress.sources_done / progress.sources_total : 0);
+    setProgressBar(total ? done / total : 0);
   }
   elements.scanProgressSources.textContent = formatSourceBreakdown(progress.by_source);
 }

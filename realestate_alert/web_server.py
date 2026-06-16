@@ -36,11 +36,18 @@ from realestate_alert.models import Listing
 from realestate_alert.naver import naver_land_coord_url, naver_land_url, naver_map_url
 from realestate_alert.public_data import PublicDataError
 from realestate_alert.registry import RegistryStatus
+from realestate_alert.filtering import matches_listing
 from realestate_alert.service import ListingSnapshot, collect_listings, run_once
 from realestate_alert.store import LEDGER_STATUSES, ListingStore
 from realestate_alert.verify import verify_address
 
 MAX_BODY_BYTES = 256 * 1024
+
+# 한 소스(예: 클라우드의 느린 법원경매)가 전체 수집을 무한정 막지 못하도록 하는 마감 시간.
+# 이 시간을 넘긴 소스는 이번 주기에서 제외하고, 끝난 소스만으로 결과를 낸다.
+COLLECT_DEADLINE_SECONDS = 120
+# 일부 소스가 마감으로 빠졌을 때(미완료) 다음 재시도까지의 대기(정상 TTL보다 짧게).
+RETRY_SOON_SECONDS = 90
 
 # 설정 시 모든 요청에 브라우저 기본 로그인(아이디 무관, 비밀번호 일치)을 요구한다.
 # 로컬 전용 사용이면 비워 두면 된다 — 클라우드 공개 배포 시 필수.
@@ -67,11 +74,14 @@ def _count_sources(listings: list[Listing]) -> dict[str, int]:
     return counts
 
 
-def _collect_with_progress(config_path: Path, config) -> ListingSnapshot:
+def _collect_with_progress(config_path: Path, config) -> tuple[ListingSnapshot, bool]:
     """수집 + 좌표 워밍을 진행률을 기록하며 수행한다(백그라운드 전용).
 
-    수집 단계는 소스가 끝날 때마다, 좌표 변환 단계는 매물 1건마다 진행률을 갱신한다.
+    - 수집 단계: 소스가 끝날 때마다 진행률을 갱신하고, 끝난 소스 결과를 캐시에 즉시 반영한다
+      (느린 소스를 기다리지 않고 빠른 소스부터 화면에 보이도록).
+    - 좌표 변환 단계: 매물 1건마다 진행률을 갱신한다.
     HTTP 핸들러는 이 진행률(_collect_progress)을 읽기만 하고 절대 수집/지오코딩하지 않는다.
+    반환: (스냅샷, 전체 소스 완료 여부) — 마감으로 일부 소스가 빠졌으면 False.
     """
     key = str(config_path)
     total_sources = len(config.sources)
@@ -88,14 +98,21 @@ def _collect_with_progress(config_path: Path, config) -> ListingSnapshot:
             "sources_done": done, "sources_total": total,
             "geocoded": 0, "geocode_total": 0,
         }
+        # 끝난 소스 결과를 즉시 캐시에 반영 — 느린 소스(법원경매)를 기다리지 않는다.
+        matched = [item for item in fetched if matches_listing(config.criteria, item)]
+        _snapshot_cache[key] = ListingSnapshot(fetched=list(fetched), matched=matched)
 
-    snapshot = collect_listings(config, on_progress=on_progress)
+    snapshot = collect_listings(
+        config, on_progress=on_progress, deadline_seconds=COLLECT_DEADLINE_SECONDS
+    )
+    complete = _collect_progress[key].get("sources_done", 0) >= total_sources
 
     # 좌표는 백그라운드에서 미리 변환한다 — HTTP 응답이 동기 지오코딩으로 502 나는 것 방지.
     base = {
         "phase": "geocoding", "fetched": snapshot.fetched_count,
         "by_source": _count_sources(snapshot.fetched),
-        "sources_done": total_sources, "sources_total": total_sources,
+        "sources_done": _collect_progress[key].get("sources_done", total_sources),
+        "sources_total": total_sources,
         "geocode_total": snapshot.matched_count,
     }
     _collect_progress[key] = {**base, "geocoded": 0}
@@ -104,7 +121,17 @@ def _collect_with_progress(config_path: Path, config) -> ListingSnapshot:
         _collect_progress[key] = {**base, "geocoded": index}
 
     _collect_progress[key] = {**base, "phase": "done", "geocoded": snapshot.matched_count}
-    return snapshot
+    return snapshot, complete
+
+
+def _store_snapshot(key: str, snapshot: ListingSnapshot, config, complete: bool) -> None:
+    """수집 결과를 캐시에 저장한다. 일부 소스가 빠졌으면 더 일찍 재시도하도록 시각을 조정."""
+    _snapshot_cache[key] = snapshot
+    if complete:
+        _snapshot_fetched_at[key] = time.monotonic()
+    else:
+        ttl = max(60, config.interval_seconds)
+        _snapshot_fetched_at[key] = time.monotonic() - ttl + RETRY_SOON_SECONDS
 
 
 def _run_collection(config_path: Path) -> None:
@@ -115,9 +142,9 @@ def _run_collection(config_path: Path) -> None:
             return
         _collecting.add(key)
     try:
-        snapshot = _collect_with_progress(config_path, load_config(config_path))
-        _snapshot_cache[key] = snapshot
-        _snapshot_fetched_at[key] = time.monotonic()
+        config = load_config(config_path)
+        snapshot, complete = _collect_with_progress(config_path, config)
+        _store_snapshot(key, snapshot, config, complete)
     except Exception as error:  # noqa: BLE001 — 수집 실패는 다음 주기에 재시도
         print(f"[collect] 백그라운드 수집 실패: {error}")
     finally:
@@ -155,10 +182,9 @@ def _run_scan(config_path: Path) -> None:
     try:
         config = load_config(config_path)
         # 진행률을 보여주며 한 번만 수집하고, 그 스냅샷을 알림·캐시에 함께 쓴다(중복 수집 제거).
-        snapshot = _collect_with_progress(config_path, config)
+        snapshot, complete = _collect_with_progress(config_path, config)
         result = run_once(config, snapshot=snapshot)
-        _snapshot_cache[key] = snapshot
-        _snapshot_fetched_at[key] = time.monotonic()
+        _store_snapshot(key, snapshot, config, complete)
         print(f"[scan] 완료 — 수집 {result.fetched_count} / 신규 {len(result.notified)}")
     except Exception as error:  # noqa: BLE001
         print(f"[scan] 백그라운드 스캔 실패: {error}")
@@ -686,6 +712,10 @@ def _listings_payload(config_path: Path) -> dict[str, Any]:
         for listing in snapshot.fetched
         if listing.identity not in matched_ids
     ]
+    # 진행 상황(단계)으로 수집 중 여부를 판단한다 — 끝난 소스를 먼저 보여줘도(부분 결과)
+    # 좌표 변환까지 끝(phase="done")나야 완료로 표시한다.
+    progress = _collect_progress.get(str(config_path))
+    collecting = bool(progress and progress.get("phase") != "done")
     return {
         "fetched_count": snapshot.fetched_count,
         "matched_count": snapshot.matched_count,
@@ -693,10 +723,10 @@ def _listings_payload(config_path: Path) -> dict[str, Any]:
         "favorite_count": len(favorites),
         "listings": listings,
         "unmatched_listings": unmatched,
-        # 첫 수집 진행 중이면 빈 결과 — UI가 잠시 후 다시 불러오도록 안내
-        "collecting": str(config_path) in _collecting and snapshot.fetched_count == 0,
+        # 수집/좌표 변환이 진행 중이면 true — UI가 잠시 후 다시 불러오도록 안내
+        "collecting": collecting,
         # 수집/좌표 변환 진행 상황 — 대시보드가 "수집 갯수 올라가는" 연출에 사용
-        "progress": _collect_progress.get(str(config_path)),
+        "progress": progress,
     }
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from dataclasses import dataclass
 from typing import Callable
 
@@ -41,7 +41,9 @@ ProgressCallback = Callable[[list[Listing], int, int], None]
 
 
 def collect_listings(
-    config: AppConfig, on_progress: ProgressCallback | None = None
+    config: AppConfig,
+    on_progress: ProgressCallback | None = None,
+    deadline_seconds: float | None = None,
 ) -> ListingSnapshot:
     sources = [_build_source(source_config) for source_config in config.sources]
     total = len(sources)
@@ -49,13 +51,21 @@ def collect_listings(
     done = 0
     # 소스가 여러 개라 병렬로 수집한다 (한 소스 실패는 건너뛰고 나머지 진행).
     # 완료되는 순서대로 받아 진행률을 콜백으로 알린다(수집 갯수가 올라가는 연출용).
-    with ThreadPoolExecutor(max_workers=min(6, max(1, total))) as pool:
-        futures = [pool.submit(_safe_fetch, source) for source in sources]
-        for future in as_completed(futures):
+    # deadline_seconds를 주면 느린 소스(예: 법원경매)가 그 시간을 넘길 때
+    # 끝난 소스 결과만 쓰고 진행한다 — 한 소스가 전체 수집을 무한정 막지 못하게.
+    pool = ThreadPoolExecutor(max_workers=min(6, max(1, total)))
+    futures = [pool.submit(_safe_fetch, source) for source in sources]
+    try:
+        for future in as_completed(futures, timeout=deadline_seconds):
             fetched.extend(future.result())
             done += 1
             if on_progress is not None:
                 on_progress(fetched, done, total)
+    except FuturesTimeoutError:
+        print(f"[collect] 수집 마감({deadline_seconds}s) 초과 — {done}/{total} 소스 완료분만 사용")
+    finally:
+        # 마감을 넘긴 느린 소스는 기다리지 않고 버린다(다음 주기에 재시도).
+        pool.shutdown(wait=False, cancel_futures=True)
     matched = [listing for listing in fetched if matches_listing(config.criteria, listing)]
     return ListingSnapshot(fetched=fetched, matched=matched)
 

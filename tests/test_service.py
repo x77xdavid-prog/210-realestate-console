@@ -58,6 +58,39 @@ class CollectProgressTests(unittest.TestCase):
         self.assertEqual(updates[-1][0], 2)
 
 
+class CollectDeadlineTests(unittest.TestCase):
+    def test_deadline_drops_slow_source_and_returns_completed(self):
+        """마감을 넘긴 느린 소스는 빼고, 끝난 소스 결과만으로 스냅샷을 만든다."""
+        import threading
+        import time as _time
+        from unittest import mock
+        from realestate_alert import service
+        from realestate_alert.models import Listing
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(_write_two_source_config(Path(temp_dir)))
+            lock = threading.Lock()
+            counter = {"n": 0}
+
+            def fake_safe_fetch(source):
+                with lock:
+                    index = counter["n"]
+                    counter["n"] += 1
+                if index >= 1:  # 두 번째 소스만 느리게 (마감 초과)
+                    _time.sleep(2)
+                return [Listing(
+                    source="manual", external_id=f"d{index}", title="병원 상가",
+                    location="서울 강남구", deposit=0, monthly_rent=0, area_m2=0.0,
+                    floor=None, premium=None, url=f"https://example.test/{index}",
+                )]
+
+            with mock.patch.object(service, "_safe_fetch", side_effect=fake_safe_fetch):
+                snapshot = service.collect_listings(config, deadline_seconds=0.3)
+
+        # 빠른 소스 1건만 들어오고, 느린 소스는 마감으로 제외된다
+        self.assertEqual(snapshot.fetched_count, 1)
+
+
 class ServiceTests(unittest.TestCase):
     def test_run_once_notifies_only_matching_new_listings(self):
         with tempfile.TemporaryDirectory() as temp_dir:
