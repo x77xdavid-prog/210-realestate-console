@@ -825,23 +825,28 @@ function renderScanProgress() {
   setScanningButton(active);
   if (!active) {
     elements.scanProgress.hidden = true;
+    showLastCollected();
     return;
   }
   elements.scanProgress.hidden = false;
-  if (progress.phase === "geocoding") {
-    elements.scanProgressTitle.textContent = "지도 좌표 변환 중…";
-    elements.scanProgressCount.textContent = `${progress.geocoded}/${progress.geocode_total}`;
-    setProgressBar(progress.geocode_total ? progress.geocoded / progress.geocode_total : 1);
-  } else {
-    const done = progress.sources_done ?? 0;
-    const total = progress.sources_total ?? 0;
-    elements.scanProgressTitle.textContent = total
-      ? `매물 수집 중… (${done}/${total} 소스)`
-      : "매물 수집 중…";
-    elements.scanProgressCount.textContent = `${progress.fetched}건`;
-    setProgressBar(total ? done / total : 0);
-  }
+  const done = progress.sources_done ?? 0;
+  const total = progress.sources_total ?? 0;
+  elements.scanProgressTitle.textContent = total
+    ? `매물 수집 중… (${done}/${total} 소스)`
+    : "매물 수집 중…";
+  elements.scanProgressCount.textContent = `${progress.fetched}건`;
+  setProgressBar(total ? done / total : 0);
   elements.scanProgressSources.textContent = formatSourceBreakdown(progress.by_source);
+}
+
+function showLastCollected() {
+  const iso = state.stats?.collected_at;
+  if (!state.hasServer || !iso) return;
+  const when = new Date(`${String(iso).replace(" ", "T")}Z`);
+  if (Number.isNaN(when.getTime())) return;
+  const hhmm = when.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+  elements.scanStatus.textContent = `마지막 수집 ${hhmm} · 10분마다 자동 갱신`;
+  elements.scanStatus.className = "status-pill ok";
 }
 
 function setProgressBar(fraction) {

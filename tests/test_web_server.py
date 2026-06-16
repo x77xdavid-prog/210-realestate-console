@@ -77,6 +77,8 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(progress["phase"], "done")
         self.assertEqual(progress["fetched"], 2)
         self.assertEqual(progress["sources_done"], progress["sources_total"])
+        # 마지막 수집 시각이 채워져 화면에 "마지막 수집 HH:MM"으로 표시된다
+        self.assertTrue(response["collected_at"])
 
     def test_api_diagnostics_reports_key_presence_and_source_counts(self):
         with tempfile.TemporaryDirectory() as temp_dir:

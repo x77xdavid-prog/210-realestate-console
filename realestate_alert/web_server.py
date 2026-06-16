@@ -45,7 +45,7 @@ MAX_BODY_BYTES = 256 * 1024
 
 # 한 소스(예: 클라우드의 느린 법원경매)가 전체 수집을 무한정 막지 못하도록 하는 마감 시간.
 # 이 시간을 넘긴 소스는 이번 주기에서 제외하고, 끝난 소스만으로 결과를 낸다.
-COLLECT_DEADLINE_SECONDS = 120
+COLLECT_DEADLINE_SECONDS = 60
 # 일부 소스가 마감으로 빠졌을 때(미완료) 다음 재시도까지의 대기(정상 TTL보다 짧게).
 RETRY_SOON_SECONDS = 90
 
@@ -57,6 +57,7 @@ DASHBOARD_PASSWORD_ENV = "DASHBOARD_PASSWORD"
 # 수집은 백그라운드 스레드가 처리한다 (저사양 클라우드에서 요청 타임아웃/OOM 방지).
 _snapshot_cache: dict[str, ListingSnapshot] = {}
 _snapshot_fetched_at: dict[str, float] = {}
+_snapshot_collected_at: dict[str, str] = {}  # 마지막 수집 완료 시각(UTC ISO) — 화면 표시용
 _collect_lock = threading.Lock()
 _collecting: set[str] = set()
 # 수집 진행 상황 — 대시보드가 "수집 갯수 올라가는" 연출을 보여주기 위해 폴링해 읽는다.
@@ -105,28 +106,33 @@ def _collect_with_progress(config_path: Path, config) -> tuple[ListingSnapshot, 
     snapshot = collect_listings(
         config, on_progress=on_progress, deadline_seconds=COLLECT_DEADLINE_SECONDS
     )
-    complete = _collect_progress[key].get("sources_done", 0) >= total_sources
+    sources_done = _collect_progress[key].get("sources_done", 0)
+    complete = sources_done >= total_sources
 
-    # 좌표는 백그라운드에서 미리 변환한다 — HTTP 응답이 동기 지오코딩으로 502 나는 것 방지.
-    base = {
-        "phase": "geocoding", "fetched": snapshot.fetched_count,
+    # 데이터가 다 모였으니 즉시 '완료' 처리한다 — 스피너가 좌표 변환까지 기다리지 않게.
+    # (좌표 변환은 _run_collection이 완료 처리 후 백그라운드로 따로 채운다)
+    _collect_progress[key] = {
+        "phase": "done", "fetched": snapshot.fetched_count,
         "by_source": _count_sources(snapshot.fetched),
-        "sources_done": _collect_progress[key].get("sources_done", total_sources),
-        "sources_total": total_sources,
-        "geocode_total": snapshot.matched_count,
+        "sources_done": sources_done, "sources_total": total_sources,
+        "geocoded": snapshot.matched_count, "geocode_total": snapshot.matched_count,
     }
-    _collect_progress[key] = {**base, "geocoded": 0}
-    for index, listing in enumerate(snapshot.matched, start=1):
-        _safe_geocode(listing.location)
-        _collect_progress[key] = {**base, "geocoded": index}
-
-    _collect_progress[key] = {**base, "phase": "done", "geocoded": snapshot.matched_count}
     return snapshot, complete
+
+
+def _warm_match_coords(listings: list[Listing]) -> None:
+    """조건 일치 매물의 좌표를 캐시에 채운다(백그라운드 — 스피너/완료와 무관).
+
+    HTTP 응답은 cached_coords로 캐시만 읽으므로, 워밍 전이면 핀이 없고 다음 새로고침에 나타난다.
+    """
+    for listing in listings:
+        _safe_geocode(listing.location)
 
 
 def _store_snapshot(key: str, snapshot: ListingSnapshot, config, complete: bool) -> None:
     """수집 결과를 캐시에 저장한다. 일부 소스가 빠졌으면 더 일찍 재시도하도록 시각을 조정."""
     _snapshot_cache[key] = snapshot
+    _snapshot_collected_at[key] = _utc_now_iso()
     if complete:
         _snapshot_fetched_at[key] = time.monotonic()
     else:
@@ -145,6 +151,8 @@ def _run_collection(config_path: Path) -> None:
         config = load_config(config_path)
         snapshot, complete = _collect_with_progress(config_path, config)
         _store_snapshot(key, snapshot, config, complete)
+        # 완료 표시 후 좌표를 천천히 채운다(스피너와 무관, 지도 핀은 다음 새로고침에 표시).
+        _warm_match_coords(snapshot.matched)
     except Exception as error:  # noqa: BLE001 — 수집 실패는 다음 주기에 재시도
         print(f"[collect] 백그라운드 수집 실패: {error}")
     finally:
@@ -185,6 +193,7 @@ def _run_scan(config_path: Path) -> None:
         snapshot, complete = _collect_with_progress(config_path, config)
         result = run_once(config, snapshot=snapshot)
         _store_snapshot(key, snapshot, config, complete)
+        _warm_match_coords(snapshot.matched)
         print(f"[scan] 완료 — 수집 {result.fetched_count} / 신규 {len(result.notified)}")
     except Exception as error:  # noqa: BLE001
         print(f"[scan] 백그라운드 스캔 실패: {error}")
@@ -684,6 +693,7 @@ def _diagnostics_payload(config_path: Path) -> dict[str, Any]:
         "collecting": str(config_path) in _collecting,
         "has_snapshot": fetched_at is not None,
         "progress": _collect_progress.get(str(config_path)),
+        "collected_at": _snapshot_collected_at.get(str(config_path)),
     }
 
 
@@ -723,10 +733,12 @@ def _listings_payload(config_path: Path) -> dict[str, Any]:
         "favorite_count": len(favorites),
         "listings": listings,
         "unmatched_listings": unmatched,
-        # 수집/좌표 변환이 진행 중이면 true — UI가 잠시 후 다시 불러오도록 안내
+        # 수집이 진행 중이면 true — UI가 잠시 후 다시 불러오도록 안내
         "collecting": collecting,
-        # 수집/좌표 변환 진행 상황 — 대시보드가 "수집 갯수 올라가는" 연출에 사용
+        # 수집 진행 상황 — 대시보드가 "수집 갯수 올라가는" 연출에 사용
         "progress": progress,
+        # 마지막 수집 완료 시각(UTC ISO) — "마지막 수집 14:32" 표시용
+        "collected_at": _snapshot_collected_at.get(str(config_path)),
     }
 
 
