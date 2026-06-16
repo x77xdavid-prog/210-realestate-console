@@ -117,6 +117,8 @@ const elements = {
   areaMax: document.querySelector("#areaMax"),
   schedulePanel: document.querySelector("#schedulePanel"),
   scheduleStrip: document.querySelector("#scheduleStrip"),
+  kakaoMap: document.querySelector("#kakaoMap"),
+  mapSearchPlaceholder: document.querySelector("#mapSearchPlaceholder"),
   ledgerRows: document.querySelector("#ledgerRows"),
   ledgerSummary: document.querySelector("#ledgerSummary"),
   priorityList: document.querySelector("#priorityList"),
@@ -176,6 +178,7 @@ const state = {
   areaMin: null,
   areaMax: null,
   dateFilter: null,
+  kakaoKey: null,
   hasServer: false,
   selectedListing: null,
   checklist: {
@@ -817,6 +820,7 @@ function renderDashboard() {
   renderScanProgress();
   renderMetrics();
   renderSchedule();
+  renderMapSearch();
   renderNewBanner();
   renderBoard();
   renderLedger();
@@ -1248,6 +1252,123 @@ function renderSchedule() {
       document.querySelector("#board").scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
+}
+
+/* ===== 지도검색 (Kakao) ===== */
+
+const FIT_MARKER_COLOR = { open: "#0f9d58", build: "#0e7490", check: "#f59e0b", unfit: "#7e93a6" };
+let kakaoLoadPromise = null;
+let kakaoMapObj = null;
+let kakaoMarkers = [];
+let kakaoInfoWindow = null;
+
+async function loadAppConfig() {
+  try {
+    const cfg = await apiJson("/api/config");
+    state.kakaoKey = (cfg.kakao_js_key || "").trim();
+  } catch {
+    state.kakaoKey = "";
+  }
+}
+
+function loadKakaoSdk(key) {
+  if (window.kakao && window.kakao.maps) return Promise.resolve();
+  if (kakaoLoadPromise) return kakaoLoadPromise;
+  kakaoLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(key)}&autoload=false`;
+    script.onload = () => window.kakao.maps.load(resolve);
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+  return kakaoLoadPromise;
+}
+
+function mapPlaceholderHtml(pinCount) {
+  return `
+    <div class="map-placeholder-card">
+      <strong><i class="ti" aria-hidden="true"></i>지도를 켜려면 Kakao 지도 키가 필요합니다 (무료)</strong>
+      <ol>
+        <li>developers.kakao.com → 애플리케이션 추가 → <b>JavaScript 키</b> 복사</li>
+        <li>플랫폼 → Web → 사이트 도메인에 <code>https://210.mapsaihelp.com</code> 등록</li>
+        <li>Render 환경변수 <code>KAKAO_JS_KEY</code> 에 키 입력 → 저장(자동 재배포)</li>
+      </ol>
+      <p>키를 넣으면 이 자리에 조건 일치 매물 <b>${pinCount}건</b>이 병원 적합도 색으로 표시됩니다.</p>
+    </div>`;
+}
+
+function mapPinImage(color) {
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="34">` +
+    `<path d="M13 0C6 0 .5 5.5.5 12.4.5 21.6 13 34 13 34s12.5-12.4 12.5-21.6C25.5 5.5 20 0 13 0z" fill="${color}"/>` +
+    `<circle cx="13" cy="12.5" r="5" fill="#fff"/></svg>`;
+  return new kakao.maps.MarkerImage(
+    "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg),
+    new kakao.maps.Size(26, 34),
+    { offset: new kakao.maps.Point(13, 34) },
+  );
+}
+
+function mapInfoHtml(listing) {
+  const fit = listing.hospital_fit ? listing.hospital_fit.label : "";
+  const appraisal = listing.appraisal_price
+    ? ` · 감정 ${Math.round((listing.appraisal_price / 100000000) * 10) / 10}억`
+    : "";
+  return `<div class="map-info-window"><strong>${escapeHtml(String(listing.title).slice(0, 38))}</strong>
+    <span>${escapeHtml(listing.location)}</span>
+    <span>${escapeHtml(fit)}${appraisal}</span></div>`;
+}
+
+function renderMapSearch() {
+  const pins = state.listings.filter((item) => item.latitude && item.longitude);
+  if (!state.kakaoKey) {
+    elements.kakaoMap.hidden = true;
+    elements.mapSearchPlaceholder.hidden = false;
+    elements.mapSearchPlaceholder.innerHTML = mapPlaceholderHtml(pins.length);
+    return;
+  }
+  elements.mapSearchPlaceholder.hidden = true;
+  elements.kakaoMap.hidden = false;
+  loadKakaoSdk(state.kakaoKey)
+    .then(() => buildKakaoMap(pins))
+    .catch(() => {
+      elements.kakaoMap.hidden = true;
+      elements.mapSearchPlaceholder.hidden = false;
+      elements.mapSearchPlaceholder.innerHTML =
+        '<div class="map-placeholder-card">지도를 불러오지 못했습니다. Kakao 키와 도메인 등록을 확인하세요.</div>';
+    });
+}
+
+function buildKakaoMap(pins) {
+  if (!window.kakao || !window.kakao.maps) return;
+  if (!kakaoMapObj) {
+    const center = pins.length
+      ? new kakao.maps.LatLng(pins[0].latitude, pins[0].longitude)
+      : new kakao.maps.LatLng(37.5266, 126.8664); // 양천구 목동 부근
+    kakaoMapObj = new kakao.maps.Map(elements.kakaoMap, { center, level: 6 });
+    kakaoInfoWindow = new kakao.maps.InfoWindow({ removable: true });
+  }
+  kakaoMarkers.forEach((marker) => marker.setMap(null));
+  kakaoMarkers = [];
+  const bounds = new kakao.maps.LatLngBounds();
+  pins.forEach((listing) => {
+    const position = new kakao.maps.LatLng(listing.latitude, listing.longitude);
+    const level = (listing.hospital_fit && listing.hospital_fit.level) || "check";
+    const marker = new kakao.maps.Marker({
+      position,
+      image: mapPinImage(FIT_MARKER_COLOR[level] || FIT_MARKER_COLOR.check),
+      title: listing.title,
+    });
+    marker.setMap(kakaoMapObj);
+    kakao.maps.event.addListener(marker, "click", () => {
+      kakaoInfoWindow.setContent(mapInfoHtml(listing));
+      kakaoInfoWindow.open(kakaoMapObj, marker);
+    });
+    kakaoMarkers.push(marker);
+    bounds.extend(position);
+  });
+  if (pins.length) kakaoMapObj.setBounds(bounds);
+  kakaoMapObj.relayout();
 }
 
 function inPriceRange(listing) {
@@ -3129,6 +3250,7 @@ try {
     document.querySelector("#mailNote").textContent =
       "정적 모드입니다. serve-web으로 실행하면 관심매물·매물장이 서버에 저장되고 Gmail 알림이 동작합니다.";
   }
+  await loadAppConfig();
   await loadFavorites();
   await loadLedger();
   await loadChecklistData();

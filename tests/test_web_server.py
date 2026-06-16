@@ -101,6 +101,19 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(diag["fetched_count"], 2)
         self.assertEqual(diag["source_counts"].get("manual"), 2)
 
+    def test_api_config_exposes_kakao_key(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                with mock.patch.dict("os.environ", {"KAKAO_JS_KEY": "abc123"}, clear=False):
+                    cfg = _request_json(server, "GET", "/api/config")
+            finally:
+                server.shutdown()
+                server.server_close()
+        self.assertEqual(cfg["kakao_js_key"], "abc123")
+
     def test_api_diagnostics_flags_missing_key(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

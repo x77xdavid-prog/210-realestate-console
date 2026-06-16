@@ -226,6 +226,10 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
             if self.path == "/api/diagnostics":
                 self._send_json(_diagnostics_payload(config_path))
                 return
+            if self.path == "/api/config":
+                # Kakao 지도 JS 키(도메인 제한 클라이언트 키)를 프런트에 전달. 없으면 빈 문자열.
+                self._send_json({"kakao_js_key": os.environ.get("KAKAO_JS_KEY", "").strip()})
+                return
             if self.path.startswith("/api/geocode"):
                 query = parse_qs(urlparse(self.path).query)
                 address = (query.get("address") or [""])[0].strip()

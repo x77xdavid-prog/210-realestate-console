@@ -20,6 +20,7 @@
           <a href="#overview" class="nav-link active">현황</a>
           <a href="#schedulePanel" class="nav-link">경매일정</a>
           <a href="#board" class="nav-link">매물 보드</a>
+          <a href="#mapSearch" class="nav-link">지도검색</a>
           <a href="#ledger" class="nav-link">매물장</a>
           <a href="#map" class="nav-link">지도</a>
           <a href="#finance" class="nav-link">매입 계산</a>
@@ -273,6 +274,23 @@
             <button type="button" class="button secondary compact" id="rangeReset">초기화</button>
           </div>
           <div class="board-grid" id="boardGrid"></div>
+        </section>
+
+        <section class="panel reveal" id="mapSearch" aria-labelledby="mapSearchTitle">
+          <div class="panel-heading row-heading">
+            <div>
+              <p class="section-kicker">Map Search</p>
+              <h2 id="mapSearchTitle">지도검색 — 병원 후보를 지도에서</h2>
+            </div>
+            <div class="map-legend" aria-hidden="true">
+              <span class="lg open">개원 가능</span>
+              <span class="lg build">신축 가능</span>
+              <span class="lg check">확인 필요</span>
+            </div>
+          </div>
+          <p class="embed-note">조건 일치 매물을 지도에 병원 적합도 색으로 표시합니다. 핀을 누르면 상세가 뜹니다. (지도가 안 보이면 Kakao 지도 키 설정이 필요합니다 — 아래 안내)</p>
+          <div id="kakaoMap" class="kakao-map" hidden></div>
+          <div id="mapSearchPlaceholder" class="map-placeholder"></div>
         </section>
 
         <section class="panel reveal" id="ledger" aria-labelledby="ledgerTitle">
@@ -536,6 +554,6 @@
         <div class="checklist-sections" id="checklistSections"></div>
       </div>
     </dialog>
-    <script type="module" src="app.js?v=20260616i"></script>
+    <script type="module" src="app.js?v=20260616j"></script>
   </body>
 </html>
