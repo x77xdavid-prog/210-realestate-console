@@ -1148,6 +1148,38 @@ td span {
   margin-top: 0;
 }
 
+.range-filter {
+  align-items: center;
+  gap: 6px;
+}
+
+.range-filter .range-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  margin-left: 6px;
+}
+
+.range-filter .range-label:first-child {
+  margin-left: 0;
+}
+
+.range-filter .range-input {
+  width: 72px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-strong);
+  color: var(--ink);
+  font-size: 0.8rem;
+}
+
+.range-filter .range-sep,
+.range-filter .range-unit {
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+}
+
 .collect-toolbar {
   display: flex;
   justify-content: space-between;

@@ -110,6 +110,11 @@ const elements = {
   boardGrid: document.querySelector("#boardGrid"),
   regionFilter: document.querySelector("#regionFilter"),
   fitFilter: document.querySelector("#fitFilter"),
+  rangeFilter: document.querySelector("#rangeFilter"),
+  priceMin: document.querySelector("#priceMin"),
+  priceMax: document.querySelector("#priceMax"),
+  areaMin: document.querySelector("#areaMin"),
+  areaMax: document.querySelector("#areaMax"),
   ledgerRows: document.querySelector("#ledgerRows"),
   ledgerSummary: document.querySelector("#ledgerSummary"),
   priorityList: document.querySelector("#priorityList"),
@@ -164,6 +169,10 @@ const state = {
   fetchedPage: 1,
   fetchedSort: "default",
   halfOnly: false,
+  priceMin: null,
+  priceMax: null,
+  areaMin: null,
+  areaMax: null,
   hasServer: false,
   selectedListing: null,
   checklist: {
@@ -936,6 +945,7 @@ function renderBoard() {
   const isFetched = state.boardFilter === "fetched";
   elements.fitFilter.hidden = !isFetched;
   elements.regionFilter.hidden = !isFetched;
+  elements.rangeFilter.hidden = !isFetched;
   // 수집 전체는 카드 그리드를 직접 그리므로 board-grid 자체는 블록으로 둔다.
   elements.boardGrid.classList.toggle("plain", isFetched);
 
@@ -1057,6 +1067,7 @@ function renderFetchedTable() {
   if (state.fitFilter !== "all") filtered = filtered.filter((item) => fitLevel(item) === state.fitFilter);
   if (state.regionFilter !== "all") filtered = filtered.filter((item) => regionOf(item.location) === state.regionFilter);
   if (state.halfOnly) filtered = filtered.filter((item) => (discountPct(item) ?? 0) >= 50);
+  filtered = filtered.filter(inPriceRange).filter(inAreaRange);
   if (filtered.length === 0) {
     elements.boardGrid.innerHTML =
       `${fetchedToolbarHtml(0, 0, 0)}<div class="empty-state">조건에 맞는 수집 매물이 없습니다. 필터를 조정하세요.</div>`;
@@ -1158,6 +1169,23 @@ function auctionTagsHtml(listing) {
   if (dday) tags.push(`<span class="atag dday">${dday}</span>`);
   if (listing.fail_count) tags.push(`<span class="atag warn">유찰 ${listing.fail_count}</span>`);
   return tags.length ? `<div class="atags">${tags.join("")}</div>` : "";
+}
+
+function inPriceRange(listing) {
+  const appraisal = listing.appraisal_price;
+  if (!appraisal) return true; // 감정가 없음(데이터 부족) → 제외하지 않음
+  const eok = appraisal / 100000000;
+  if (state.priceMin != null && eok < state.priceMin) return false;
+  if (state.priceMax != null && eok > state.priceMax) return false;
+  return true;
+}
+
+function inAreaRange(listing) {
+  const area = listing.area_m2 || listing.land_area_m2 || 0;
+  if (!area) return true; // 면적 없음 → 제외하지 않음
+  if (state.areaMin != null && area < state.areaMin) return false;
+  if (state.areaMax != null && area > state.areaMax) return false;
+  return true;
 }
 
 function sortFetched(list, sortKey) {
@@ -2826,6 +2854,29 @@ function setBoardFilter(filter) {
   });
   renderBoard();
 }
+
+[
+  ["priceMin", "priceMin"],
+  ["priceMax", "priceMax"],
+  ["areaMin", "areaMin"],
+  ["areaMax", "areaMax"],
+].forEach(([elKey, stateKey]) => {
+  elements[elKey].addEventListener("input", () => {
+    const raw = elements[elKey].value;
+    state[stateKey] = raw === "" ? null : Number(raw);
+    state.fetchedPage = 1;
+    renderBoard();
+  });
+});
+
+document.querySelector("#rangeReset").addEventListener("click", () => {
+  ["priceMin", "priceMax", "areaMin", "areaMax"].forEach((key) => {
+    elements[key].value = "";
+    state[key] = null;
+  });
+  state.fetchedPage = 1;
+  renderBoard();
+});
 
 document.querySelectorAll("[data-board-filter]").forEach((chip) => {
   chip.addEventListener("click", () => {

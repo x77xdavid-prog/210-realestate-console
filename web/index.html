@@ -247,6 +247,19 @@
           </div>
           <div class="board-subfilter" id="fitFilter" hidden role="group" aria-label="병원 적합도 필터"></div>
           <div class="board-subfilter" id="regionFilter" hidden role="group" aria-label="지역 필터"></div>
+          <div class="board-subfilter range-filter" id="rangeFilter" hidden role="group" aria-label="가격·면적 범위">
+            <span class="range-label">감정가</span>
+            <input type="number" id="priceMin" class="range-input" placeholder="최소" min="0" step="0.5" />
+            <span class="range-sep">~</span>
+            <input type="number" id="priceMax" class="range-input" placeholder="최대" min="0" step="0.5" />
+            <span class="range-unit">억</span>
+            <span class="range-label">면적</span>
+            <input type="number" id="areaMin" class="range-input" placeholder="최소" min="0" step="10" />
+            <span class="range-sep">~</span>
+            <input type="number" id="areaMax" class="range-input" placeholder="최대" min="0" step="10" />
+            <span class="range-unit">㎡</span>
+            <button type="button" class="button secondary compact" id="rangeReset">초기화</button>
+          </div>
           <div class="board-grid" id="boardGrid"></div>
         </section>
 
@@ -511,6 +524,6 @@
         <div class="checklist-sections" id="checklistSections"></div>
       </div>
     </dialog>
-    <script type="module" src="app.js?v=20260616g"></script>
+    <script type="module" src="app.js?v=20260616h"></script>
   </body>
 </html>
