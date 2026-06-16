@@ -52,10 +52,59 @@ _snapshot_cache: dict[str, ListingSnapshot] = {}
 _snapshot_fetched_at: dict[str, float] = {}
 _collect_lock = threading.Lock()
 _collecting: set[str] = set()
+# 수집 진행 상황 — 대시보드가 "수집 갯수 올라가는" 연출을 보여주기 위해 폴링해 읽는다.
+_collect_progress: dict[str, dict[str, Any]] = {}
 
 
 def _empty_snapshot() -> ListingSnapshot:
     return ListingSnapshot(fetched=[], matched=[])
+
+
+def _count_sources(listings: list[Listing]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for listing in listings:
+        counts[listing.source] = counts.get(listing.source, 0) + 1
+    return counts
+
+
+def _collect_with_progress(config_path: Path, config) -> ListingSnapshot:
+    """수집 + 좌표 워밍을 진행률을 기록하며 수행한다(백그라운드 전용).
+
+    수집 단계는 소스가 끝날 때마다, 좌표 변환 단계는 매물 1건마다 진행률을 갱신한다.
+    HTTP 핸들러는 이 진행률(_collect_progress)을 읽기만 하고 절대 수집/지오코딩하지 않는다.
+    """
+    key = str(config_path)
+    total_sources = len(config.sources)
+    _collect_progress[key] = {
+        "phase": "collecting", "fetched": 0, "by_source": {},
+        "sources_done": 0, "sources_total": total_sources,
+        "geocoded": 0, "geocode_total": 0,
+    }
+
+    def on_progress(fetched: list[Listing], done: int, total: int) -> None:
+        _collect_progress[key] = {
+            "phase": "collecting", "fetched": len(fetched),
+            "by_source": _count_sources(fetched),
+            "sources_done": done, "sources_total": total,
+            "geocoded": 0, "geocode_total": 0,
+        }
+
+    snapshot = collect_listings(config, on_progress=on_progress)
+
+    # 좌표는 백그라운드에서 미리 변환한다 — HTTP 응답이 동기 지오코딩으로 502 나는 것 방지.
+    base = {
+        "phase": "geocoding", "fetched": snapshot.fetched_count,
+        "by_source": _count_sources(snapshot.fetched),
+        "sources_done": total_sources, "sources_total": total_sources,
+        "geocode_total": snapshot.matched_count,
+    }
+    _collect_progress[key] = {**base, "geocoded": 0}
+    for index, listing in enumerate(snapshot.matched, start=1):
+        _safe_geocode(listing.location)
+        _collect_progress[key] = {**base, "geocoded": index}
+
+    _collect_progress[key] = {**base, "phase": "done", "geocoded": snapshot.matched_count}
+    return snapshot
 
 
 def _run_collection(config_path: Path) -> None:
@@ -66,21 +115,13 @@ def _run_collection(config_path: Path) -> None:
             return
         _collecting.add(key)
     try:
-        snapshot = collect_listings(load_config(config_path))
-        # 좌표 변환은 백그라운드에서 미리 끝낸다 — HTTP 응답이 동기 지오코딩으로 502 나는 것 방지.
-        _warm_match_coords(snapshot.matched)
+        snapshot = _collect_with_progress(config_path, load_config(config_path))
         _snapshot_cache[key] = snapshot
         _snapshot_fetched_at[key] = time.monotonic()
     except Exception as error:  # noqa: BLE001 — 수집 실패는 다음 주기에 재시도
         print(f"[collect] 백그라운드 수집 실패: {error}")
     finally:
         _collecting.discard(key)
-
-
-def _warm_match_coords(listings: list[Listing]) -> None:
-    """조건 일치 매물의 좌표를 미리 변환해 캐시에 채운다(백그라운드 전용)."""
-    for listing in listings:
-        _safe_geocode(listing.location)
 
 
 def _ensure_collection(config_path: Path, force: bool = False) -> bool:
@@ -113,11 +154,10 @@ def _run_scan(config_path: Path) -> None:
         _collecting.add(key)
     try:
         config = load_config(config_path)
-        result = run_once(config)
-        # run_once가 내부에서 다시 수집하므로 캐시도 최신 스냅샷으로 맞춘다
-        fresh = collect_listings(config)
-        _warm_match_coords(fresh.matched)
-        _snapshot_cache[key] = fresh
+        # 진행률을 보여주며 한 번만 수집하고, 그 스냅샷을 알림·캐시에 함께 쓴다(중복 수집 제거).
+        snapshot = _collect_with_progress(config_path, config)
+        result = run_once(config, snapshot=snapshot)
+        _snapshot_cache[key] = snapshot
         _snapshot_fetched_at[key] = time.monotonic()
         print(f"[scan] 완료 — 수집 {result.fetched_count} / 신규 {len(result.notified)}")
     except Exception as error:  # noqa: BLE001
@@ -617,6 +657,7 @@ def _diagnostics_payload(config_path: Path) -> dict[str, Any]:
         "source_counts": source_counts,
         "collecting": str(config_path) in _collecting,
         "has_snapshot": fetched_at is not None,
+        "progress": _collect_progress.get(str(config_path)),
     }
 
 
@@ -654,6 +695,8 @@ def _listings_payload(config_path: Path) -> dict[str, Any]:
         "unmatched_listings": unmatched,
         # 첫 수집 진행 중이면 빈 결과 — UI가 잠시 후 다시 불러오도록 안내
         "collecting": str(config_path) in _collecting and snapshot.fetched_count == 0,
+        # 수집/좌표 변환 진행 상황 — 대시보드가 "수집 갯수 올라가는" 연출에 사용
+        "progress": _collect_progress.get(str(config_path)),
     }
 
 

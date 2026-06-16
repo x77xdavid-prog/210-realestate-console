@@ -112,6 +112,12 @@ const elements = {
   ledgerSummary: document.querySelector("#ledgerSummary"),
   priorityList: document.querySelector("#priorityList"),
   scanStatus: document.querySelector("#scanStatus"),
+  scanButton: document.querySelector("#scanButton"),
+  scanProgress: document.querySelector("#scanProgress"),
+  scanProgressTitle: document.querySelector("#scanProgressTitle"),
+  scanProgressCount: document.querySelector("#scanProgressCount"),
+  scanProgressFill: document.querySelector("#scanProgressFill"),
+  scanProgressSources: document.querySelector("#scanProgressSources"),
   estimateGrid: document.querySelector("#estimateGrid"),
   mapAddressInput: document.querySelector("#mapAddressInput"),
   naverMapFrame: document.querySelector("#naverMapFrame"),
@@ -489,7 +495,7 @@ function scheduleCollectingReload() {
       elements.scanStatus.className = "status-pill ok";
     }
     renderDashboard();
-  }, 4000);
+  }, 2000);
 }
 
 async function loadFavorites() {
@@ -615,6 +621,7 @@ async function deleteLedgerEntry(identity) {
 
 async function runScan() {
   if (state.hasServer) {
+    setScanningButton(true);  // 클릭 즉시 버튼 반응 (진행 상황은 폴링이 채운다)
     try {
       const result = await apiJson("/api/scan", { method: "POST" });
       if (result.scanning) {
@@ -675,7 +682,14 @@ function sortNewFirst(listings) {
 }
 
 function sourceLabel(source) {
-  return { naver: "네이버", onbid: "온비드", manual: "수동 등록", json_file: "파일" }[source] ?? source;
+  return {
+    naver: "네이버",
+    onbid: "온비드",
+    court: "법원경매",
+    lh: "LH",
+    manual: "수동 등록",
+    json_file: "파일",
+  }[source] ?? source;
 }
 
 function renderNewBanner() {
@@ -781,6 +795,7 @@ function renderFitBoard() {
 /* ===== Rendering ===== */
 
 function renderDashboard() {
+  renderScanProgress();
   renderMetrics();
   renderNewBanner();
   renderBoard();
@@ -793,11 +808,64 @@ function renderDashboard() {
 }
 
 function renderMetrics() {
+  const progress = state.stats?.progress;
+  const collecting = Boolean(state.stats?.collecting) && progress;
   const newCount = state.stats?.new_count ?? state.listings.filter((listing) => listing.is_new).length;
-  setMetric(elements.fetchedCount, state.stats?.fetched_count ?? state.listings.length);
+  // 수집 중에는 진행률의 누적 건수를 보여줘 "수집 갯수가 올라가는" 연출을 한다.
+  const fetched = collecting ? progress.fetched : (state.stats?.fetched_count ?? state.listings.length);
+  setMetric(elements.fetchedCount, fetched);
   setMetric(elements.matchedCount, state.stats?.matched_count ?? state.listings.length);
   setMetric(elements.newCount, newCount);
   setMetric(elements.favoriteCount, state.favorites.size);
+}
+
+function renderScanProgress() {
+  const progress = state.stats?.progress;
+  const active = Boolean(state.stats?.collecting) && progress && progress.phase !== "done";
+  setScanningButton(active);
+  if (!active) {
+    elements.scanProgress.hidden = true;
+    return;
+  }
+  elements.scanProgress.hidden = false;
+  if (progress.phase === "geocoding") {
+    elements.scanProgressTitle.textContent = "지도 좌표 변환 중…";
+    elements.scanProgressCount.textContent = `${progress.geocoded}/${progress.geocode_total}`;
+    setProgressBar(progress.geocode_total ? progress.geocoded / progress.geocode_total : 1);
+  } else {
+    elements.scanProgressTitle.textContent = "매물 수집 중…";
+    elements.scanProgressCount.textContent = `${progress.fetched}건`;
+    setProgressBar(progress.sources_total ? progress.sources_done / progress.sources_total : 0);
+  }
+  elements.scanProgressSources.textContent = formatSourceBreakdown(progress.by_source);
+}
+
+function setProgressBar(fraction) {
+  const clamped = Math.max(0, Math.min(1, fraction));
+  // 합성기 친화적 속성(transform)만 애니메이션한다.
+  elements.scanProgressFill.style.transform = `scaleX(${clamped})`;
+}
+
+function setScanningButton(scanning) {
+  const button = elements.scanButton;
+  if (!button) return;
+  button.classList.toggle("is-scanning", scanning);
+  button.disabled = scanning;
+  const label = button.querySelector(".scan-label");
+  if (label) label.textContent = scanning ? "수집 중…" : "신규 매물 스캔";
+}
+
+function formatSourceBreakdown(bySource) {
+  if (!bySource) return "";
+  const order = ["onbid", "court", "lh", "manual", "naver", "json_file"];
+  const rank = (key) => {
+    const index = order.indexOf(key);
+    return index === -1 ? order.length : index;
+  };
+  return Object.keys(bySource)
+    .sort((a, b) => rank(a) - rank(b))
+    .map((key) => `${sourceLabel(key)} ${bySource[key]}`)
+    .join(" · ");
 }
 
 function setMetric(element, value) {

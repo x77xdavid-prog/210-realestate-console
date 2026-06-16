@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from typing import Callable
 
 from realestate_alert.config import AppConfig, NotifierConfig, SourceConfig
 from realestate_alert.filtering import matches_listing
@@ -35,13 +36,26 @@ class ListingSnapshot:
         return len(self.matched)
 
 
-def collect_listings(config: AppConfig) -> ListingSnapshot:
+# 수집 진행 콜백: (지금까지 수집된 매물, 완료 소스 수, 전체 소스 수)
+ProgressCallback = Callable[[list[Listing], int, int], None]
+
+
+def collect_listings(
+    config: AppConfig, on_progress: ProgressCallback | None = None
+) -> ListingSnapshot:
     sources = [_build_source(source_config) for source_config in config.sources]
+    total = len(sources)
     fetched: list[Listing] = []
-    # 소스가 여러 개라 병렬로 수집한다 (한 소스 실패는 건너뛰고 나머지 진행)
-    with ThreadPoolExecutor(max_workers=min(6, max(1, len(sources)))) as pool:
-        for result in pool.map(_safe_fetch, sources):
-            fetched.extend(result)
+    done = 0
+    # 소스가 여러 개라 병렬로 수집한다 (한 소스 실패는 건너뛰고 나머지 진행).
+    # 완료되는 순서대로 받아 진행률을 콜백으로 알린다(수집 갯수가 올라가는 연출용).
+    with ThreadPoolExecutor(max_workers=min(6, max(1, total))) as pool:
+        futures = [pool.submit(_safe_fetch, source) for source in sources]
+        for future in as_completed(futures):
+            fetched.extend(future.result())
+            done += 1
+            if on_progress is not None:
+                on_progress(fetched, done, total)
     matched = [listing for listing in fetched if matches_listing(config.criteria, listing)]
     return ListingSnapshot(fetched=fetched, matched=matched)
 
@@ -54,12 +68,14 @@ def _safe_fetch(source: ListingSource) -> list[Listing]:
         return []
 
 
-def run_once(config: AppConfig) -> RunResult:
+def run_once(config: AppConfig, snapshot: ListingSnapshot | None = None) -> RunResult:
     store = ListingStore(config.database_path)
     store.initialize()
     notifiers = [_build_notifier(notifier_config) for notifier_config in config.notifiers]
 
-    snapshot = collect_listings(config)
+    # 스캔 경로에서 이미 수집한 스냅샷을 재사용해 중복 수집을 피한다(없으면 새로 수집).
+    if snapshot is None:
+        snapshot = collect_listings(config)
     new_listings = [listing for listing in snapshot.matched if store.mark_seen_if_new(listing)]
 
     for notifier in notifiers:

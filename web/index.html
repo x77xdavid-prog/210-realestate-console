@@ -43,10 +43,22 @@
             </button>
             <button type="button" class="button primary" id="scanButton">
               <span class="icon" aria-hidden="true">⌕</span>
-              신규 매물 스캔
+              <span class="scan-label">신규 매물 스캔</span>
             </button>
           </div>
         </header>
+
+        <section class="scan-progress" id="scanProgress" hidden aria-live="polite" aria-label="수집 진행 상황">
+          <div class="scan-progress-top">
+            <span class="scan-progress-spinner" aria-hidden="true"></span>
+            <strong class="scan-progress-title" id="scanProgressTitle">매물 수집 중…</strong>
+            <span class="scan-progress-count" id="scanProgressCount">0건</span>
+          </div>
+          <div class="scan-progress-bar" aria-hidden="true">
+            <span class="scan-progress-fill" id="scanProgressFill"></span>
+          </div>
+          <p class="scan-progress-sources" id="scanProgressSources"></p>
+        </section>
 
         <section class="new-banner reveal" id="newBanner" hidden aria-label="신규 매물 알림">
           <div class="new-banner-glow" aria-hidden="true"></div>
@@ -497,6 +509,6 @@
         <div class="checklist-sections" id="checklistSections"></div>
       </div>
     </dialog>
-    <script type="module" src="app.js?v=20260612r"></script>
+    <script type="module" src="app.js?v=20260616a"></script>
   </body>
 </html>

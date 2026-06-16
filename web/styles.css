@@ -534,6 +534,98 @@ select {
   color: var(--rose);
 }
 
+/* ===== Scan progress — 수집 진행 연출 (수집 갯수 올라가는 표시) ===== */
+.scan-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px;
+  border-radius: var(--radius-md);
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-float);
+}
+
+.scan-progress-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.scan-progress-spinner {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 50%;
+  border: 2.5px solid var(--teal-soft);
+  border-top-color: var(--teal);
+  animation: scanSpin 0.8s linear infinite;
+}
+
+@keyframes scanSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.scan-progress-title {
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.scan-progress-count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 1.05rem;
+  color: var(--teal);
+}
+
+.scan-progress-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  overflow: hidden;
+}
+
+.scan-progress-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform: scaleX(0);
+  transform-origin: left;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--teal), var(--teal-bright));
+  transition: transform 0.5s var(--ease-out);
+}
+
+.scan-progress-sources {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.button.primary.is-scanning {
+  opacity: 0.85;
+  cursor: progress;
+}
+
+.button.primary.is-scanning .icon {
+  display: inline-block;
+  animation: scanSpin 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scan-progress-spinner,
+  .button.primary.is-scanning .icon {
+    animation: none;
+  }
+  .scan-progress-fill {
+    transition: none;
+  }
+}
+
 .badge-new {
   display: inline-flex;
   align-items: center;

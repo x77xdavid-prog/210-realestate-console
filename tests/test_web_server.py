@@ -61,6 +61,23 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(with_cache["latitude"], 37.5)
         self.assertEqual(with_cache["longitude"], 127.0)
 
+    def test_api_listings_exposes_collection_progress(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                response = _listings_when_ready(server)
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        progress = response["progress"]
+        self.assertIsNotNone(progress)
+        self.assertEqual(progress["phase"], "done")
+        self.assertEqual(progress["fetched"], 2)
+        self.assertEqual(progress["sources_done"], progress["sources_total"])
+
     def test_api_diagnostics_reports_key_presence_and_source_counts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

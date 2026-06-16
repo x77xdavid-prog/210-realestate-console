@@ -4,7 +4,58 @@ import unittest
 from pathlib import Path
 
 from realestate_alert.config import load_config
-from realestate_alert.service import run_once
+from realestate_alert.service import collect_listings, run_once
+
+
+def _write_two_source_config(root: Path) -> Path:
+    """json_file 소스 2개짜리 설정 — 진행 콜백이 소스 완료마다 호출되는지 검증용."""
+    config_path = root / "config.json"
+    paths = []
+    for index in range(2):
+        listings_path = root / f"src{index}.json"
+        listings_path.write_text(
+            json.dumps(
+                [{
+                    "source": "manual", "external_id": f"m{index}",
+                    "title": "강남 병원 가능 상가", "location": "서울 강남구",
+                    "deposit": 80000000, "monthly_rent": 4000000, "area_m2": 90,
+                    "floor": "2층", "premium": 0, "url": f"https://example.test/{index}",
+                }],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        paths.append(listings_path)
+    config_path.write_text(
+        json.dumps(
+            {
+                "database_path": str(root / "seen.sqlite3"),
+                "criteria": {"locations": ["강남구"], "required_keywords": ["병원"]},
+                "sources": [{"type": "json_file", "path": str(p)} for p in paths],
+                "notifiers": [{"type": "memory"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    return config_path
+
+
+class CollectProgressTests(unittest.TestCase):
+    def test_on_progress_called_once_per_source_with_rising_counts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config = load_config(_write_two_source_config(Path(temp_dir)))
+            updates: list[tuple[int, int, int]] = []
+            snapshot = collect_listings(
+                config,
+                on_progress=lambda fetched, done, total: updates.append((len(fetched), done, total)),
+            )
+
+        self.assertEqual(snapshot.fetched_count, 2)
+        # 소스 2개 → 콜백 2회, 완료 수는 1→2로 증가, 합계는 단조 증가
+        self.assertEqual([u[1] for u in updates], [1, 2])
+        self.assertTrue(all(u[2] == 2 for u in updates))
+        self.assertEqual(updates[-1][0], 2)
 
 
 class ServiceTests(unittest.TestCase):
