@@ -21,6 +21,7 @@ from __future__ import annotations
 import gzip
 import json
 import re
+import time
 import urllib.request
 from collections import defaultdict
 from http.cookiejar import CookieJar
@@ -32,8 +33,11 @@ ECFS_BASE = "https://ecfs.scourt.go.kr"
 PVO_BASE = "https://pvo.scourt.go.kr"
 VWR_INF_URL = f"{ECFS_BASE}/sgvo/sgvomain/selectDocVwrInf.on"
 GET_PDF_URL = f"{ECFS_BASE}/sgvo/sgvomain/getPdf.on"
-TIMEOUT = 25
+TIMEOUT = 20
+PAGE_TIMEOUT = 12  # StreamDocs 페이지별 — 짧게 잡아 전체 체인이 길게 늘어지지 않게
+TOTAL_BUDGET = 60.0  # 텍스트 추출 단계 총 벽시계 예산(공유 세마포어 점유 시간 상한)
 MAX_PAGES = 12
+_SID_RE = re.compile(r"[A-Za-z0-9._-]+")
 
 LinesFetcher = Callable[[str, str, str], list[str]]
 
@@ -83,7 +87,9 @@ def parse_sale_spec(lines: list[str]) -> dict[str, Any]:
         if not _NAME_ROW.match(ln) or ln.startswith(_HDR_WORDS):
             continue
         rest = ln[len(ln.split()[0]):].strip()
-        if not (re.search(_DATE, rest) or "미상" in rest or re.search(r"\d+\s*만원|원", rest)):
+        # 날짜/미상/금액(숫자+원)이 있는 성명行만 임차인으로 본다.
+        # 금액은 반드시 숫자가 선행해야 한다(맨 '원' 음절 — 권원/직원 등 오탐 방지).
+        if not (re.search(_DATE, rest) or "미상" in rest or re.search(r"\d[\d,]*\s*(?:만)?원", rest)):
             continue
         tenants.append({"name": ln.split()[0], "detail": re.sub(r"\s{2,}", " ", rest)})
 
@@ -175,6 +181,10 @@ def _live_sale_spec_lines(cs_no: str, cort_ofc_cd: str, gds_seq: str) -> list[st
     if not info:
         return []
     viewer_url = build_viewer_url(info["viewer_base"], info["enc_param"])
+    # 업스트림이 돌려준 뷰어 base를 직접 fetch하므로 ecfs 도메인인지 확인(방어).
+    if not viewer_url.startswith(f"{ECFS_BASE}/"):
+        print(f"[sale-spec] 예상치 못한 뷰어 호스트, 중단: {viewer_url[:60]}")
+        return []
     jar = CookieJar()
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
 
@@ -197,20 +207,28 @@ def _live_sale_spec_lines(cs_no: str, cort_ofc_cd: str, gds_seq: str) -> list[st
     token = data.get("accessToken")
     if not sid or not token:
         return []
+    # sid는 경로에 보간되므로 형식 검증(업스트림 신뢰 가드).
+    if not _SID_RE.fullmatch(str(sid)):
+        print(f"[sale-spec] 비정상 streamdocsId, 중단: {str(sid)[:40]}")
+        return []
 
-    # 2) StreamDocs 텍스트 레이어를 페이지별로 (Authorization: Access-Token)
+    # 2) StreamDocs 텍스트 레이어를 페이지별로 (Authorization: Access-Token).
+    #    총 벽시계 예산(TOTAL_BUDGET)으로 공유 세마포어 점유 시간을 제한한다.
     auth = {"User-Agent": _UA, "Authorization": "Access-Token " + token,
             "Accept": "application/json, text/plain, */*", "Referer": f"{PVO_BASE}/streamdocs/view/sd"}
     try:
-        opener.open(urllib.request.Request(f"{PVO_BASE}/streamdocs/v4/documents/{sid}/document", headers=auth), timeout=TIMEOUT).read(50)
+        opener.open(urllib.request.Request(f"{PVO_BASE}/streamdocs/v4/documents/{sid}/document", headers=auth), timeout=PAGE_TIMEOUT).read(50)
     except Exception:  # noqa: BLE001 — document open은 선택적
         pass
     lines: list[str] = []
+    deadline = time.monotonic() + TOTAL_BUDGET
     for page in range(MAX_PAGES):
+        if time.monotonic() > deadline:
+            break
         try:
             resp = opener.open(
                 urllib.request.Request(f"{PVO_BASE}/streamdocs/v4/documents/{sid}/texts/{page}", headers=auth),
-                timeout=TIMEOUT,
+                timeout=PAGE_TIMEOUT,
             )
             raw = resp.read()
             if resp.headers.get("Content-Encoding") == "gzip":
@@ -221,4 +239,7 @@ def _live_sale_spec_lines(cs_no: str, cort_ofc_cd: str, gds_seq: str) -> list[st
         if not runs:
             break
         lines.extend(reconstruct_lines(runs))
+    if not lines:
+        # sid/token은 받았는데 텍스트를 못 얻음 — '문서 없음'과 '추출 실패' 구분용 로그.
+        print(f"[sale-spec] 텍스트 0라인(sid 확보, 페이지 소진) {cort_ofc_cd} {cs_no}")
     return lines
