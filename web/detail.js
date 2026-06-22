@@ -136,11 +136,11 @@ async function fetchDetail(params) {
 
 /** Fills the sticky case header strip */
 function renderCaseHeader(d) {
-  $("dp-court-badge").textContent = escapeHtml(d.court || "");
-  $("dp-case-no").textContent     = escapeHtml(d.case_no || "");
-  $("dp-case-type").textContent   = escapeHtml(d.auction_type || "");
-  $("dp-addr-road").textContent   = escapeHtml(d.addr_road || "");
-  $("dp-addr-jibun").textContent  = escapeHtml(d.addr_jibun || "");
+  $("dp-court-badge").textContent = d.court || "";
+  $("dp-case-no").textContent     = d.case_no || "";
+  $("dp-case-type").textContent   = d.auction_type || "";
+  $("dp-addr-road").textContent   = d.addr_road || "";
+  $("dp-addr-jibun").textContent  = d.addr_jibun || "";
   elCaseHeader.hidden = false;
   document.title = `${d.case_no || "상세"} — 병원매물 자동검색`;
 }
@@ -196,7 +196,6 @@ function selectPhoto(idx) {
   const mainImg = $("dp-gallery").querySelector(".dp-gallery-main");
   if (mainImg) {
     mainImg.src = photoSrc(_photos[idx]);
-    mainImg.addEventListener("click", () => openLightbox(idx), { once: true });
   }
   const thumbs = $("dp-gallery").querySelectorAll(".dp-gallery-thumb");
   thumbs.forEach((t, i) => t.classList.toggle("dp-thumb-active", i === idx));
@@ -587,16 +586,20 @@ function renderVerifyGroup(report) {
   const land = report.land || {};
   const building = report.building || {};
 
-  addRow("용도지역", land.zoning || land.usage_zone || "—");
-  addRow("도로접면", land.road_side || land.road_access || "—");
-  addRow("지형", land.terrain || "—");
-  addRow("공시지가", land.official_land_price != null ? won(land.official_land_price) + "/m²" : "—");
-  addRow("건물 주용도", building.main_purpose || building.purpose || "—");
-  addRow("연면적", building.total_floor_area != null ? pyeong(building.total_floor_area) : "—");
-  addRow("층수", building.floors != null ? `${building.floors}층` : "—");
-  addRow("주차 대수", building.parking_count != null ? `${building.parking_count}대` : "—");
-  addRow("승강기", building.elevator != null ? (building.elevator ? "있음" : "없음") : "—");
-  addRow("사용승인일", building.approval_date ? fmtY(String(building.approval_date).replace(/-/g, "")) : "—");
+  if (land.zoning_names != null) addRow("용도지역", Array.isArray(land.zoning_names) ? land.zoning_names.join(", ") : String(land.zoning_names));
+  if (land.road_side != null) addRow("도로접면", String(land.road_side));
+  if (land.land_use_situation != null) addRow("이용상황", String(land.land_use_situation));
+  if (land.terrain_shape != null || land.terrain_height != null) {
+    const parts = [land.terrain_shape, land.terrain_height].filter(Boolean);
+    addRow("지형", parts.join(" · "));
+  }
+  if (land.official_price_per_m2 != null) addRow("공시지가", won(land.official_price_per_m2) + "/㎡");
+  if (building.main_purpose != null) addRow("건물 주용도", String(building.main_purpose));
+  if (building.total_area_m2 != null) addRow("연면적", pyeong(building.total_area_m2));
+  if (building.ground_floors != null) addRow("층수", `${building.ground_floors}층`);
+  if (building.parking_spaces != null) addRow("주차 대수", `${building.parking_spaces}대`);
+  if (building.elevator_count != null) addRow("승강기", building.elevator_count > 0 ? "있음" : "없음");
+  if (building.approval_date != null) addRow("사용승인일", fmtY(String(building.approval_date).replace(/-/g, "")));
 
   div.appendChild(kv);
   return div;
@@ -640,10 +643,9 @@ function renderMarketGroup(market, errors) {
     kv.appendChild(row);
   };
 
-  addRow("평균 매매가", market.avg_sale_price != null ? won(market.avg_sale_price) : "—");
-  addRow("평균 전세가", market.avg_rent_price != null ? won(market.avg_rent_price) : "—");
-  addRow("거래 건수", market.trade_count != null ? `${market.trade_count}건` : "—");
-  addRow("조회 기간", market.period || "—");
+  if (market.avg_price_per_m2 != null) addRow("평균 ㎡당가", won(market.avg_price_per_m2) + "/㎡");
+  if (market.trade_count != null) addRow("거래 건수", `${market.trade_count}건`);
+  if (market.months != null) addRow("조회 기간", `최근 ${market.months}개월`);
 
   div.appendChild(kv);
   return div;
@@ -783,7 +785,7 @@ async function boot() {
     const data = await fetchDetail(params);
 
     if (data && data.error) {
-      showError("서버 오류", escapeHtml(data.error));
+      showError("서버 오류", data.error);
       return;
     }
 

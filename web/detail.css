@@ -36,6 +36,10 @@
 
   --rail-left: 200px;
   --rail-right: 220px;
+
+  --border: #e4e9ee;
+  --surface-soft: #f7f9fb;
+  --ink-mid: #55636e;
 }
 
 * { box-sizing: border-box; }
