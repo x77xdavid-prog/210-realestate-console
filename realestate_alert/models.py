@@ -32,6 +32,14 @@ class Listing:
     approval_year: int | None = None
     elevator: bool | None = None
     buildable_note: str | None = None
+    thumbnail_path: str | None = None
+    photo_count: int | None = None
+    incumbrance_tags: tuple[str, ...] = ()
+    cs_no: str | None = None
+    cort_ofc_cd: str | None = None
+    gds_seq: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
 
     @property
     def identity(self) -> str:
@@ -54,3 +62,50 @@ class SearchCriteria:
     min_area_m2: float | None = None
     max_premium: int | None = None
     required_keywords: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class Photo:
+    file: str          # 로컬 상대경로 (web_server가 서빙)
+    dvs: str           # 사진 구분 라벨
+    seq: int
+
+
+@dataclass(frozen=True)
+class StatusItem:
+    label: str         # 현황 요항 라벨
+    text: str
+
+
+@dataclass(frozen=True)
+class BidEvent:
+    date: str          # YYYYMMDD
+    low: int | None    # 해당 회차 최저가
+    result: str        # 유찰 / 진행 / 매각결정 / 변경
+
+
+@dataclass(frozen=True)
+class AuctionDetail:
+    identity: str
+    court: str
+    dept: str
+    case_no: str
+    addr_road: str
+    addr_jibun: str
+    usage: str
+    auction_type: str
+    land_m2: float | None
+    bldg_m2: float | None
+    appraisal: int | None
+    min_bid: int | None
+    deposit: int | None
+    claim_amt: int | None
+    fail_count: int | None
+    sale_date: str | None
+    photos: tuple[Photo, ...] = ()
+    status_items: tuple[StatusItem, ...] = ()
+    bid_history: tuple[BidEvent, ...] = ()
+    incumbrances: tuple[str, ...] = ()
+    doc_ecid: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
