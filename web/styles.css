@@ -1599,17 +1599,111 @@ td span {
   border-radius: 50%;
   background: #e08a1e;
 }
-/* 사이드패널 항목: 제목 위 / 입찰기간·가격 아래로 쌓아 좁은 2단에서도 읽히게 */
-.cal-court-grid .cal-crow:not(.cal-crow-all) {
+/* ===== 캘린더 사이드패널 압축 (지역 칩 + 병원후보 우선 + 컴팩트 1줄) ===== */
+.cal-side-list {
+  display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
 }
-.cal-cnm {
+.cal-side-summary {
+  font-weight: 800;
+  font-size: 13.5px;
+  color: var(--ink);
+  padding: 2px 2px 8px;
+  border-bottom: 2px solid var(--ink);
+  margin-bottom: 8px;
+}
+.cal-region-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+.cal-rchip {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 99px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-family: inherit;
+}
+.cal-rchip.on {
+  background: var(--teal);
+  color: #fff;
+  border-color: var(--teal);
+}
+.cal-cand-head {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--teal);
+  margin: 2px 0 2px;
+}
+.cal-rowc {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 2px;
+}
+.cal-rowc .cal-cnm {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   word-break: keep-all;
 }
-.cal-cmeta {
-  flex-wrap: wrap;
+.cal-rowc .cal-cmeta {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cal-fitb {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--teal);
+  background: var(--teal-soft);
+  padding: 1px 6px;
+  border-radius: 99px;
+  white-space: nowrap;
+  margin-right: 2px;
+}
+.cal-disc {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #c0392b;
+}
+.cal-others {
+  margin-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+.cal-others > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-faint);
+  padding: 8px 2px;
+}
+.cal-board-link {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 9px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--teal);
+  background: var(--teal-soft);
+  border: 1px solid var(--teal);
+  border-radius: 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.cal-board-link:hover {
+  background: var(--teal);
+  color: #fff;
 }
 
 /* ===== 병원 적합도 배지 ===== */

@@ -1348,6 +1348,7 @@ const calState = {
   data: null,     // cached API response for current ym
   selDay: null,   // selected day number (1-31)
   kind: "all",    // 캘린더 필터: all | court(경매) | onbid(공매)
+  calRegion: "all", // 사이드패널 지역(구) 필터 — 날/월/종류 바뀌면 all로 리셋
   loading: false,
 };
 
@@ -1428,6 +1429,34 @@ function renderAuctionCalendar(ym) {
   buildCalendarHtml(cal, calState.selDay);
 }
 
+// 캘린더 사이드패널 컴팩트 1줄 행 (적합배지·제목·할인율·최저가·온비드링크)
+function calRowHtml(item) {
+  const lvl = fitLevel(item);
+  const isHosp = lvl === "open" || lvl === "build";
+  const k = auctionKind(item);
+  const srcBadge = k === "onbid"
+    ? `<span class="cal-src onbid">공매</span>`
+    : k === "court"
+    ? `<span class="cal-src court">경매</span>`
+    : "";
+  const fitLabel = item.hospital_fit && item.hospital_fit.label;
+  const fitBadge = isHosp && fitLabel ? `<span class="cal-fitb">${escapeHtml(fitLabel)}</span>` : "";
+  const disc = discountPct(item);
+  const discHtml = disc != null ? `<span class="cal-disc">${disc}%↓</span>` : "";
+  const minBid = item.min_bid_price != null ? `<span class="cal-ccnt">${cdtWon(item.min_bid_price)}</span>` : "";
+  const onbidHref = k === "onbid" && item.url ? safeHref(item.url) : "#";
+  const onbidLink = onbidHref !== "#"
+    ? `<a class="cal-onbid-link" href="${escapeHtml(onbidHref)}" target="_blank" rel="noreferrer">온비드↗</a>`
+    : "";
+  const clickable = item.detail_link
+    ? `style="cursor:pointer" data-cal-identity="${escapeHtml(identityOf(item))}"`
+    : "";
+  return `<div class="cal-crow cal-rowc${isHosp ? " cal-crow-hosp" : ""}" ${clickable}>
+    <span class="cal-cnm">${srcBadge}${fitBadge}${escapeHtml(item.title || item.location || "-")}</span>
+    <span class="cal-cmeta">${discHtml}${minBid}${onbidLink}</span>
+  </div>`;
+}
+
 function buildCalendarHtml(cal, selDay) {
   const container = document.getElementById("calendarContainer");
   if (!container) return;
@@ -1468,52 +1497,53 @@ function buildCalendarHtml(cal, selDay) {
     </div>`;
   }
 
-  // Side panel: listings for selected day from collected rows
+  // Side panel: listings for selected day — 지역 칩 + 병원후보 우선 + 기타 접기로 압축
   const selDD = String(selDay).padStart(2, "0");
   const selYmd = ym + selDD;
-  const totalForDay = (cal.days && cal.days[selDD]) || 0;
-  const hospForDay = (cal.hospDays && cal.hospDays[selDD]) || 0;
 
   const calKind = cal.kind || calState.kind || "all";
+  const calRegion = calState.calRegion || "all";
   const allDayRows = [...state.listings, ...(state.unmatched || [])];
-  const dayListings = (calKind === "all" ? allDayRows : allDayRows.filter((r) => auctionKind(r) === calKind))
+  // 해당 날짜·종류(경매/공매)의 전체 — 지역 칩 카운트는 지역필터 적용 전 기준으로 센다
+  const dayAll = (calKind === "all" ? allDayRows : allDayRows.filter((r) => auctionKind(r) === calKind))
     .filter((r) => String(r.sale_date || "") === selYmd);
-  const kindLabel = { all: "전체", court: "경매", onbid: "공매" }[calKind] || "전체";
+  const regionCounts = {};
+  for (const r of dayAll) {
+    const rg = regionOf(r.location);
+    regionCounts[rg] = (regionCounts[rg] || 0) + 1;
+  }
+  const regionsSorted = sortByOrder(Object.keys(regionCounts), REGION_ORDER);
+  const dayListings = calRegion === "all" ? dayAll : dayAll.filter((r) => regionOf(r.location) === calRegion);
+  const isHospRow = (r) => { const l = fitLevel(r); return l === "open" || l === "build"; };
+  const cand = dayListings.filter(isHospRow);
+  const others = dayListings.filter((r) => !isHospRow(r));
 
-  let courtHtml = `<div class="cal-crow cal-crow-all">
-    <span class="cal-cnm">${kindLabel} ${totalForDay.toLocaleString()}건</span>
-    ${hospForDay ? `<span class="cal-ccnt sched-fit">병원 후보 ${hospForDay}</span>` : ""}
-  </div>`;
-  for (const item of dayListings) {
-    const lvl = fitLevel(item);
-    const isHosp = lvl === "open" || lvl === "build";
-    const minBid = item.min_bid_price != null ? `최저 ${cdtWon(item.min_bid_price)}` : "";
-    const appraisal = item.appraisal_price != null ? `감정 ${cdtWon(item.appraisal_price)}` : "";
-    const priceHtml = [minBid, appraisal].filter(Boolean).join(" / ");
-    const k = auctionKind(item);
-    const srcBadge = k === "onbid"
-      ? `<span class="cal-src onbid">공매</span>`
-      : k === "court"
-      ? `<span class="cal-src court">경매</span>`
+  // 지역 칩 (구가 2개 이상일 때만)
+  const regionChips = regionsSorted.length > 1
+    ? `<div class="cal-region-chips">
+        <button type="button" class="cal-rchip${calRegion === "all" ? " on" : ""}" data-cal-region="all">전체 ${dayAll.length}</button>
+        ${regionsSorted.map((rg) => `<button type="button" class="cal-rchip${calRegion === rg ? " on" : ""}" data-cal-region="${escapeHtml(rg)}">${escapeHtml(rg)} ${regionCounts[rg]}</button>`).join("")}
+      </div>`
+    : "";
+
+  let listHtml;
+  if (dayAll.length === 0) {
+    listHtml = `<div class="cal-crow cal-empty">해당 유형 일정이 없습니다</div>`;
+  } else {
+    const candHtml = cand.length
+      ? cand.map(calRowHtml).join("")
+      : `<div class="cal-crow cal-empty">병원 후보 없음</div>`;
+    const othersHtml = others.length
+      ? `<details class="cal-others"><summary>기타 ${others.length}건 더보기</summary>${others.map(calRowHtml).join("")}</details>`
       : "";
-    const bidPeriod = (k === "onbid" && item.bid_begin && item.bid_end)
-      ? `<span class="cal-bidperiod">입찰 ${fmtMd(item.bid_begin)}~${fmtMd(item.bid_end)}</span>`
-      : "";
-    const onbidHref = k === "onbid" && item.url ? safeHref(item.url) : "#";
-    const onbidLink = onbidHref !== "#"
-      ? `<a class="cal-onbid-link" href="${escapeHtml(onbidHref)}" target="_blank" rel="noreferrer">온비드↗</a>`
-      : "";
-    const clickable = item.detail_link
-      ? `style="cursor:pointer" data-cal-identity="${escapeHtml(identityOf(item))}"`
-      : "";
-    courtHtml += `<div class="cal-crow${isHosp ? " cal-crow-hosp" : ""}" ${clickable}>
-      <span class="cal-cnm">${srcBadge}${escapeHtml(item.title || item.location || "-")}</span>
-      <span class="cal-cmeta">${bidPeriod}${priceHtml ? `<span class="cal-ccnt">${priceHtml}</span>` : ""}${onbidLink}</span>
-    </div>`;
+    listHtml = `<div class="cal-cand-head">🏥 병원 후보 ${cand.length}건</div>${candHtml}${othersHtml}`;
   }
-  if (dayListings.length === 0) {
-    courtHtml += `<div class="cal-crow cal-empty">해당 유형 일정이 없습니다</div>`;
-  }
+
+  const kindLabel = { all: "전체", court: "경매", onbid: "공매" }[calKind] || "전체";
+  const boardLink = dayAll.length
+    ? `<button type="button" class="cal-board-link" data-cal-board-date="${selYmd}">이 날 보드에서 전체 보기 (${dayAll.length}) →</button>`
+    : "";
+  const courtHtml = `<div class="cal-side-summary">${kindLabel} ${dayAll.length}건 · 병원 후보 ${dayAll.filter(isHospRow).length}건</div>${regionChips}${listHtml}${boardLink}`;
 
   const selDateLabel = `${year}. ${String(month).padStart(2, "0")}. ${String(selDay).padStart(2, "0")}`;
   const isToday = selDay === todayDay;
@@ -1539,7 +1569,7 @@ function buildCalendarHtml(cal, selDay) {
         <div class="cal-side-hd">
           <b>${selDateLabel}</b>${isToday ? `<span class="cal-today-tag">오늘</span>` : ""}
         </div>
-        <div class="cal-court-grid">${courtHtml}</div>
+        <div class="cal-side-list">${courtHtml}</div>
       </div>
     </div>
   `;
@@ -1549,6 +1579,7 @@ function buildCalendarHtml(cal, selDay) {
     cell.addEventListener("click", () => {
       const d = parseInt(cell.dataset.calday, 10);
       calState.selDay = d;
+      calState.calRegion = "all"; // 날 바뀌면 지역 필터 리셋
       buildCalendarHtml(cal, d);
 
       // Wire board date filter
@@ -1568,7 +1599,30 @@ function buildCalendarHtml(cal, selDay) {
   container.querySelectorAll("[data-calmove]").forEach((btn) => {
     btn.addEventListener("click", () => {
       calState.selDay = null;
+      calState.calRegion = "all";
       renderAuctionCalendar(btn.dataset.calmove);
+    });
+  });
+
+  // Wire 지역(구) 칩 — 사이드패널만 다시 그린다(보드 점프 없음)
+  container.querySelectorAll("[data-cal-region]").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      calState.calRegion = chip.dataset.calRegion;
+      buildCalendarHtml(cal, calState.selDay);
+    });
+  });
+
+  // Wire '이 날 전체 보드에서 보기' — 해당 날짜로 보드 필터 + 이동
+  container.querySelectorAll("[data-cal-board-date]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.dateFilter = btn.dataset.calBoardDate;
+      state.boardFilter = "fetched";
+      state.fetchedPage = 1;
+      document.querySelectorAll("[data-board-filter]").forEach((item) => {
+        item.classList.toggle("active", item.dataset.boardFilter === "fetched");
+      });
+      renderBoard();
+      document.querySelector("#board").scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
 
@@ -3532,6 +3586,7 @@ document.querySelectorAll("[data-cal-kind]").forEach((tab) => {
   tab.addEventListener("click", () => {
     calState.kind = tab.dataset.calKind;
     calState.selDay = null; // 필터 바뀌면 해당 유형의 가장 바쁜 날을 다시 고르도록
+    calState.calRegion = "all";
     document.querySelectorAll("[data-cal-kind]").forEach((t) =>
       t.classList.toggle("cal-tab-on", t.dataset.calKind === calState.kind));
     renderAuctionCalendar(calState.ym);
