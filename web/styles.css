@@ -1642,23 +1642,37 @@ td span {
 .cal-rowc {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 2px;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-strong);
+}
+.cal-rowc:hover {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+  border-radius: 10px;
 }
 .cal-rowc .cal-cnm {
   flex: 1;
   min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   word-break: keep-all;
+  line-height: 1.45;
 }
 .cal-rowc .cal-cmeta {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  text-align: right;
+  padding-top: 1px;
 }
 .cal-fitb {
   font-size: 10.5px;
