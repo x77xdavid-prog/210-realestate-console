@@ -1027,9 +1027,19 @@ function listingCardHtml(listing) {
   const priceText = listing.monthly_rent > 0
     ? `${money(listing.deposit)} / ${money(listing.monthly_rent)}`
     : "매입가 협의";
+  const thumbHtml = (() => {
+    if (listing.thumbnail_url) {
+      const badge = listing.photo_count
+        ? `<span class="thumb-count">📷 ${listing.photo_count}</span>`
+        : "";
+      return `<div class="card-thumb"><img src="${listing.thumbnail_url}" alt="매물 사진" loading="lazy">${badge}</div>`;
+    }
+    return `<div class="card-thumb"><div class="thumb-ph">사진 준비중</div></div>`;
+  })();
   return `
     <article class="listing-card${isFavorite ? " is-favorite" : ""}" data-tilt
       data-card-identity="${escapeHtml(identity)}" title="클릭하면 상세 정보로 이동">
+      ${thumbHtml}
       <div class="card-top">
         ${listing.is_new ? `<span class="badge-new${isFresh24h(listing) ? " fresh" : ""}">NEW</span><span class="new-ago">${relativeTimeFrom(listing.first_seen_at)}</span>` : ""}
         <span class="type-chip">${isLand ? "토지" : "건물"}</span>
@@ -1212,6 +1222,11 @@ function auctionTagsHtml(listing) {
   const dday = ddayText(listing.sale_date);
   if (dday) tags.push(`<span class="atag dday">${dday}</span>`);
   if (listing.fail_count) tags.push(`<span class="atag warn">유찰 ${listing.fail_count}</span>`);
+  if (Array.isArray(listing.incumbrance_tags)) {
+    for (const tag of listing.incumbrance_tags) {
+      tags.push(`<span class="atag risk">${escapeHtml(tag)}</span>`);
+    }
+  }
   return tags.length ? `<div class="atags">${tags.join("")}</div>` : "";
 }
 
