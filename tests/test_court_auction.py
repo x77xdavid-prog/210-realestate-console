@@ -131,6 +131,13 @@ class CourtAuctionTests(unittest.TestCase):
         self.assertEqual(listing.gds_seq, "1")
         self.assertAlmostEqual(listing.latitude, 37.52, places=2)
 
+    def test_count_for_date_reads_total_and_absorbs_error(self):
+        from realestate_alert.court_auction import count_for_date
+        self.assertEqual(count_for_date("B000210", "20260623",
+            fetcher=lambda b: _result([{}, {}, {}])), 3)
+        def boom(b): raise RuntimeError("down")
+        self.assertEqual(count_for_date("B000210", "20260623", fetcher=boom), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

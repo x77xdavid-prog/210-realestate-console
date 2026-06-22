@@ -143,6 +143,18 @@ class CourtAuctionSource:
         return today.strftime("%Y%m%d"), (today + timedelta(days=SEARCH_WINDOW_DAYS)).strftime("%Y%m%d")
 
 
+def count_for_date(cort_ofc_cd: str, ymd: str, fetcher: SearchFetcher | None = None) -> int:
+    """해당 법원·매각기일(단일일)의 물건 수(totalCnt). 실패는 0으로 흡수."""
+    body = build_search_body(cort_ofc_cd, ymd, ymd, page_size=1, page_no=1)
+    get = fetcher or _live_search
+    try:
+        payload = json.loads(get(body))
+        data = payload.get("data") or {}
+        return _to_int((data.get("dma_pageInfo") or {}).get("totalCnt"))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def _to_int(value: Any) -> int:
     try:
         return int(str(value).replace(",", "").strip() or 0)

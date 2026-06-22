@@ -259,11 +259,8 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                             courts = list(court_auction.COURT_CODES.values())
 
                             def count_fetcher(court, ymd):
-                                try:
-                                    from realestate_alert.court_auction import SearchFetcher
-                                    return 0
-                                except Exception:
-                                    return 0
+                                from realestate_alert.court_auction import count_for_date
+                                return count_for_date(court, ymd)
 
                             raw = court_calendar.month_counts(
                                 courts,
