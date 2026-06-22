@@ -402,6 +402,151 @@ body::after {
   margin-top: 2px;
 }
 
+/* ===== 실거래 시세 (시세분석) ===== */
+.dp-market-block {
+  border-top: 1px solid var(--line);
+  padding: 4px 0 8px;
+}
+
+.dp-subsection-title {
+  font-size: .82rem;
+  font-weight: 700;
+  color: var(--teal);
+  letter-spacing: .03em;
+  padding: 12px 16px 8px;
+}
+
+.dp-market-loading,
+.dp-market-empty {
+  padding: 6px 16px 14px;
+  font-size: .85rem;
+  color: var(--ink-faint);
+}
+
+.dp-market-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+  padding: 0 16px 12px;
+}
+
+.dp-market-stat {
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  text-align: center;
+}
+
+.dp-market-stat-val {
+  font-size: .98rem;
+  font-weight: 700;
+  color: var(--navy);
+}
+
+.dp-market-stat-label {
+  font-size: .72rem;
+  color: var(--ink-faint);
+  margin-top: 4px;
+}
+
+.dp-market-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .84rem;
+}
+
+.dp-market-table thead th {
+  background: rgba(13,36,54,.04);
+  font-weight: 700;
+  font-size: .76rem;
+  letter-spacing: .04em;
+  color: var(--ink-soft);
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.dp-market-table tbody td {
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+/* ===== 주변 통계 용도 분포 ===== */
+.dp-usage-dist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 16px 14px;
+}
+
+.dp-usage-row {
+  display: grid;
+  grid-template-columns: 96px 1fr 44px;
+  align-items: center;
+  gap: 10px;
+  font-size: .82rem;
+}
+
+.dp-usage-name {
+  color: var(--ink-soft);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dp-usage-bar {
+  height: 10px;
+  background: var(--surface-soft);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.dp-usage-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--teal), var(--teal-bright));
+  border-radius: 99px;
+}
+
+.dp-usage-count {
+  color: var(--ink-faint);
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* ===== 임차인 · 점유관계 ===== */
+.dp-src-tag {
+  display: inline-block;
+  font-size: .68rem;
+  font-weight: 600;
+  color: var(--teal);
+  background: var(--teal-soft);
+  border-radius: 99px;
+  padding: 2px 8px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.dp-tenant-meta {
+  padding: 12px 16px 4px;
+  font-size: .8rem;
+  color: var(--ink-faint);
+}
+
+.dp-salespec-block {
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+  padding-top: 4px;
+}
+
+.dp-salespec-block .dp-hosp-kv {
+  padding: 4px 16px 10px;
+}
+
 /* ===== Rights / incumbrances ===== */
 .dp-rights-list {
   padding: 14px 18px;

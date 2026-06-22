@@ -51,9 +51,11 @@
       <div class="dp-tab-nav" id="dp-tab-nav">
         <button class="dp-tab-btn dp-tab-active" data-target="sec-basic">기본내역</button>
         <button class="dp-tab-btn" data-target="sec-status">현황정보</button>
+        <button class="dp-tab-btn" data-target="sec-tenants">임차인</button>
         <button class="dp-tab-btn" data-target="sec-presented">제시외/건물</button>
         <button class="dp-tab-btn" data-target="sec-register">등기/지번</button>
         <button class="dp-tab-btn" data-target="sec-price">시세분석</button>
+        <button class="dp-tab-btn" data-target="sec-nearby">주변통계</button>
         <button class="dp-tab-btn" data-target="sec-misc">기타</button>
         <button class="dp-tab-btn" data-target="sec-hospital">병원분석</button>
       </div>
@@ -81,10 +83,44 @@
         </table>
       </section>
 
-      <!-- 시세분석 (price cards) -->
+      <!-- 시세분석 (price cards + 실거래 시세) -->
       <section class="dp-panel dp-section-anchor" id="sec-price">
         <div class="dp-panel-title">가격 · 시세</div>
         <div class="dp-price-cards" id="dp-price-cards"></div>
+
+        <!-- 실거래 시세 (국토부) -->
+        <div class="dp-market-block" id="dp-market-block">
+          <div class="dp-subsection-title">실거래 시세 · 국토부 상업업무용</div>
+          <div id="dp-market-body">
+            <div class="dp-market-loading" id="dp-market-loading">실거래 시세를 불러오는 중…</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 주변 경매 통계 (자체 수집 데이터 집계) -->
+      <section class="dp-panel dp-section-anchor" id="sec-nearby">
+        <div class="dp-panel-title">주변 경매 통계</div>
+        <div id="dp-nearby-body">
+          <div class="dp-market-loading" id="dp-nearby-loading">주변 경매 통계를 집계하는 중…</div>
+        </div>
+      </section>
+
+      <!-- 임차인 · 점유관계 (현황조사서) -->
+      <section class="dp-panel dp-section-anchor" id="sec-tenants">
+        <div class="dp-panel-title">임차인 · 점유관계 <span class="dp-src-tag">현황조사서</span></div>
+        <div id="dp-tenants-body">
+          <div class="dp-market-loading" id="dp-tenants-loading">현황조사서를 불러오는 중…</div>
+        </div>
+
+        <!-- 매각물건명세서 (법원 판단: 말소기준·확정·배당·대항력 비고) -->
+        <div class="dp-salespec-block" id="dp-salespec-block">
+          <div class="dp-subsection-title">
+            매각물건명세서 <span class="dp-src-tag">법원 판단 · 말소기준/배당</span>
+          </div>
+          <div id="dp-salespec-body">
+            <div class="dp-market-loading" id="dp-salespec-loading">매각물건명세서를 분석하는 중…</div>
+          </div>
+        </div>
       </section>
 
       <!-- 권리분석 인수사항 -->
@@ -182,7 +218,7 @@
             <span class="dp-doc-link-icon">🏛️</span>
             법원경매정보
           </a>
-          <a class="dp-doc-link"
+          <a class="dp-doc-link" id="dp-doc-sale-spec"
              href="https://www.courtauction.go.kr" target="_blank" rel="noopener noreferrer">
             <span class="dp-doc-link-icon">📄</span>
             매각물건명세서

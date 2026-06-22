@@ -60,6 +60,36 @@ def verify_address(
     return report
 
 
+def market_for_address(
+    address: str,
+    market_months: int = DEFAULT_MARKET_MONTHS,
+    fetcher: Fetcher | None = None,
+) -> dict[str, Any]:
+    """주소 하나에 대해 실거래 시세만 조회한다 (건축물대장/토지 호출 없음).
+
+    상세 페이지 시세분석 탭이 가볍게 시세만 받기 위한 헬퍼.
+    주소 파싱 실패·API 키 없음·조회 실패는 모두 흡수하고 ``error``에 사유를 남긴다.
+    """
+    result: dict[str, Any] = {"address": address, "market": None, "error": None}
+    try:
+        parcel = parse_parcel_address(address)
+    except ValueError as error:
+        result["error"] = str(error)
+        return result
+    try:
+        market = summarize_market(
+            lawd_cd=parcel.sigungu_code,
+            months=recent_deal_months(market_months),
+            dong=parcel.dong,
+            fetcher=fetcher,
+        )
+    except (MissingApiKeyError, PublicDataError) as error:
+        result["error"] = str(error)
+        return result
+    result["market"] = _market_to_dict(market)
+    return result
+
+
 def enrich_listing(
     listing: Listing,
     building: BuildingTitle | None,

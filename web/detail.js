@@ -324,6 +324,442 @@ function renderPriceCards(d) {
   });
 }
 
+// ── 실거래 시세 (시세분석 섹션) ──────────────────────────────────────────────
+
+/**
+ * POST /api/market 로 실거래 시세만 가볍게 조회 (건축물대장/토지 호출 없음).
+ * @param {string} address 지번주소
+ * @returns {Promise<object>}  { address, market, error }
+ */
+async function fetchMarket(address) {
+  const resp = await fetch("/api/market", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ address, months: 6 }),
+  });
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => "");
+    throw new Error(`HTTP ${resp.status}: ${txt || resp.statusText}`);
+  }
+  return resp.json();
+}
+
+/** 시세분석 섹션에 실거래 시세(요약 + 최근 거래표) 렌더 */
+function renderMarket(result) {
+  const body = $("dp-market-body");
+  if (!body) return;
+  body.innerHTML = "";
+
+  const market = result && result.market;
+  if (!market) {
+    const msg = document.createElement("div");
+    msg.className = "dp-market-empty";
+    msg.textContent =
+      result && result.error
+        ? "실거래 시세를 불러오지 못했습니다."
+        : "주변 실거래 내역이 없습니다.";
+    body.appendChild(msg);
+    return;
+  }
+
+  // 요약 stat 카드
+  const stats = document.createElement("div");
+  stats.className = "dp-market-stats";
+  const months = Array.isArray(market.months) ? market.months.length : null;
+  const statRows = [
+    ["평균 ㎡당가", market.avg_price_per_m2 != null ? won(market.avg_price_per_m2) : "—"],
+    ["최저 ㎡당가", market.min_price_per_m2 != null ? won(market.min_price_per_m2) : "—"],
+    ["최고 ㎡당가", market.max_price_per_m2 != null ? won(market.max_price_per_m2) : "—"],
+    ["거래 건수", (market.trade_count != null ? market.trade_count : 0) + "건"],
+    ["조회 기간", months != null ? `최근 ${months}개월` : "—"],
+  ];
+  statRows.forEach(([label, val]) => {
+    const card = document.createElement("div");
+    card.className = "dp-market-stat";
+    card.innerHTML =
+      `<div class="dp-market-stat-val">${escapeHtml(val)}</div>` +
+      `<div class="dp-market-stat-label">${escapeHtml(label)}</div>`;
+    stats.appendChild(card);
+  });
+  body.appendChild(stats);
+
+  // 최근 실거래 테이블
+  const trades = Array.isArray(market.recent_trades) ? market.recent_trades : [];
+  if (trades.length === 0) {
+    const none = document.createElement("div");
+    none.className = "dp-market-empty";
+    none.textContent = "표시할 최근 거래가 없습니다.";
+    body.appendChild(none);
+    return;
+  }
+
+  const tableWrap = document.createElement("div");
+  tableWrap.style.overflowX = "auto";
+  const table = document.createElement("table");
+  table.className = "dp-market-table";
+  table.innerHTML =
+    "<thead><tr><th>거래일</th><th>동</th><th>용도</th><th>거래가</th><th>전용면적</th><th>㎡당가</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  trades.forEach((t) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td>${escapeHtml(t.deal_date || "—")}</td>` +
+      `<td>${escapeHtml(t.dong || "—")}</td>` +
+      `<td>${escapeHtml(t.building_use || "—")}</td>` +
+      `<td>${escapeHtml(won(t.deal_amount_won))}</td>` +
+      `<td>${escapeHtml(t.building_area_m2 != null ? pyeong(t.building_area_m2) : "—")}</td>` +
+      `<td>${escapeHtml(t.price_per_building_m2 != null ? won(t.price_per_building_m2) : "—")}</td>`;
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  tableWrap.appendChild(table);
+  body.appendChild(tableWrap);
+}
+
+/** 시세 비동기 로드 (논블로킹: 본문 렌더를 막지 않는다) */
+async function loadMarket(address) {
+  const body = $("dp-market-body");
+  if (!address) {
+    if (body) {
+      body.innerHTML =
+        '<div class="dp-market-empty">주소 정보가 없어 시세를 조회할 수 없습니다.</div>';
+    }
+    return;
+  }
+  try {
+    const result = await fetchMarket(address);
+    renderMarket(result);
+  } catch (err) {
+    if (body) {
+      body.innerHTML = "";
+      const msg = document.createElement("div");
+      msg.className = "dp-market-empty";
+      msg.textContent = "실거래 시세를 불러오지 못했습니다.";
+      body.appendChild(msg);
+    }
+  }
+}
+
+// ── 주변 경매 통계 (자체 수집 데이터 집계) ─────────────────────────────────────
+
+/** 한국 주소에서 구/군·동/읍/면 토큰 추출 */
+function parseRegion(addr) {
+  const s = String(addr || "");
+  const guMatch = s.match(/([가-힣]{1,6}(?:구|군))(?:\s|$)/);
+  const dongMatch = s.match(/([가-힣]{1,6}(?:동|읍|면))(?:\s|\d|$)/);
+  return {
+    gu: guMatch ? guMatch[1] : "",
+    dong: dongMatch ? dongMatch[1] : "",
+  };
+}
+
+/** GET /api/listings → 매물 풀 (matched + unmatched 합산) */
+async function fetchListings() {
+  const resp = await fetch("/api/listings");
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  const a = Array.isArray(data.listings) ? data.listings : [];
+  const b = Array.isArray(data.unmatched_listings) ? data.unmatched_listings : [];
+  return a.concat(b);
+}
+
+/**
+ * 현재 물건과 같은 구의 경매 물건 통계 집계
+ * @returns {object|null}  null = 지역 파싱 실패
+ */
+function computeNearbyStats(listings, currentAddr, currentIdentity) {
+  const cur = parseRegion(currentAddr);
+  if (!cur.gu) return null;
+
+  const pool = (Array.isArray(listings) ? listings : []).filter(
+    (l) => l && l.identity !== currentIdentity && parseRegion(l.location).gu === cur.gu
+  );
+  if (pool.length === 0) return { gu: cur.gu, dong: cur.dong, count: 0 };
+
+  const sameDong = cur.dong
+    ? pool.filter((l) => parseRegion(l.location).dong === cur.dong).length
+    : 0;
+
+  const drops = [];
+  pool.forEach((l) => {
+    const ap = Number(l.appraisal_price);
+    const mb = Number(l.min_bid_price);
+    if (ap > 0 && mb > 0) drops.push((1 - mb / ap) * 100);
+  });
+  const avgDrop = drops.length ? drops.reduce((a, b) => a + b, 0) / drops.length : null;
+
+  const fails = pool.map((l) => Number(l.fail_count)).filter((n) => !isNaN(n));
+  const avgFail = fails.length ? fails.reduce((a, b) => a + b, 0) / fails.length : null;
+
+  const usageMap = {};
+  pool.forEach((l) => {
+    const u = ((l.usage || l.property_type || "기타") + "").trim() || "기타";
+    usageMap[u] = (usageMap[u] || 0) + 1;
+  });
+  const usageDist = Object.entries(usageMap)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  return { gu: cur.gu, dong: cur.dong, count: pool.length, sameDong, avgDrop, avgFail, usageDist };
+}
+
+/** 주변 통계 렌더 */
+function renderNearbyStats(stats) {
+  const body = $("dp-nearby-body");
+  if (!body) return;
+  body.innerHTML = "";
+
+  if (!stats || !stats.gu) {
+    body.innerHTML =
+      '<div class="dp-market-empty">지역 정보를 확인할 수 없어 통계를 낼 수 없습니다.</div>';
+    return;
+  }
+  if (stats.count === 0) {
+    body.innerHTML = `<div class="dp-market-empty">수집된 ${escapeHtml(stats.gu)} 인근 경매 물건이 없습니다.</div>`;
+    return;
+  }
+
+  const stat = document.createElement("div");
+  stat.className = "dp-market-stats";
+  const rows = [
+    [`${stats.gu} 경매물건`, stats.count + "건"],
+    [`같은 동(${stats.dong || "—"})`, stats.dong ? stats.sameDong + "건" : "—"],
+    ["평균 하락률", stats.avgDrop != null ? `−${Math.round(stats.avgDrop)}%` : "—"],
+    ["평균 유찰횟수", stats.avgFail != null ? stats.avgFail.toFixed(1) + "회" : "—"],
+  ];
+  rows.forEach(([label, val]) => {
+    const card = document.createElement("div");
+    card.className = "dp-market-stat";
+    card.innerHTML =
+      `<div class="dp-market-stat-val">${escapeHtml(val)}</div>` +
+      `<div class="dp-market-stat-label">${escapeHtml(label)}</div>`;
+    stat.appendChild(card);
+  });
+  body.appendChild(stat);
+
+  const dist = Array.isArray(stats.usageDist) ? stats.usageDist : [];
+  if (dist.length) {
+    const title = document.createElement("div");
+    title.className = "dp-subsection-title";
+    title.textContent = "용도별 분포";
+    body.appendChild(title);
+
+    const wrap = document.createElement("div");
+    wrap.className = "dp-usage-dist";
+    const max = dist[0][1] || 1;
+    dist.forEach(([usage, n]) => {
+      const row = document.createElement("div");
+      row.className = "dp-usage-row";
+      const pct = Math.max(6, Math.round((n / max) * 100));
+      row.innerHTML =
+        `<span class="dp-usage-name">${escapeHtml(usage)}</span>` +
+        `<span class="dp-usage-bar"><span class="dp-usage-fill" style="width:${pct}%"></span></span>` +
+        `<span class="dp-usage-count">${escapeHtml(String(n))}건</span>`;
+      wrap.appendChild(row);
+    });
+    body.appendChild(wrap);
+  }
+}
+
+/** 주변 통계 비동기 로드 (논블로킹) */
+async function loadNearbyStats(currentAddr, currentIdentity) {
+  const body = $("dp-nearby-body");
+  try {
+    const listings = await fetchListings();
+    renderNearbyStats(computeNearbyStats(listings, currentAddr, currentIdentity));
+  } catch (err) {
+    if (body) {
+      body.innerHTML = '<div class="dp-market-empty">주변 통계를 불러오지 못했습니다.</div>';
+    }
+  }
+}
+
+// ── 임차인 · 점유관계 (현황조사서) ─────────────────────────────────────────────
+
+/** GET /api/listing/tenants → 현황조사서 임대차/점유 데이터 */
+async function fetchTenants(cs, court) {
+  const qs = new URLSearchParams({ cs, court }).toString();
+  const resp = await fetch(`/api/listing/tenants?${qs}`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+/** 임차인 · 점유관계 렌더 */
+function renderTenants(data) {
+  const body = $("dp-tenants-body");
+  if (!body) return;
+  body.innerHTML = "";
+
+  const tenants = data && Array.isArray(data.tenants) ? data.tenants : [];
+  const survey = (data && data.survey) || {};
+
+  if (survey.sent_date || survey.exam_dates) {
+    const meta = document.createElement("div");
+    meta.className = "dp-tenant-meta";
+    const parts = [];
+    if (survey.sent_date) parts.push("송달일 " + fmtY(survey.sent_date));
+    if (survey.exam_dates) parts.push("조사일시 " + survey.exam_dates);
+    meta.textContent = parts.join("   ·   ");
+    body.appendChild(meta);
+  }
+
+  if (tenants.length === 0) {
+    const none = document.createElement("div");
+    none.className = "dp-market-empty";
+    none.textContent = "현황조사서상 임차인·점유자 정보가 없습니다.";
+    body.appendChild(none);
+    return;
+  }
+
+  const wrap = document.createElement("div");
+  wrap.style.overflowX = "auto";
+  const table = document.createElement("table");
+  table.className = "dp-market-table";
+  table.innerHTML =
+    "<thead><tr><th>점유자</th><th>호/부분</th><th>전입일</th><th>확정일자</th>" +
+    "<th>보증금</th><th>차임</th><th>비고</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  tenants.forEach((t) => {
+    const part = [t.address, t.part].filter(Boolean).join(" ");
+    const note = [t.possession, t.note].filter(Boolean).join(" / ");
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td>${escapeHtml(t.name || "—")}</td>` +
+      `<td>${escapeHtml(part || "—")}</td>` +
+      `<td>${escapeHtml(t.move_in || "—")}</td>` +
+      `<td>${escapeHtml(t.confirm || "—")}</td>` +
+      `<td>${escapeHtml(t.deposit || "—")}</td>` +
+      `<td>${escapeHtml(t.rent || "—")}</td>` +
+      `<td>${escapeHtml(note || "—")}</td>`;
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  body.appendChild(wrap);
+}
+
+/** 임차인 비동기 로드 (논블로킹) */
+async function loadTenants(cs, court) {
+  const body = $("dp-tenants-body");
+  if (!cs || !court) {
+    if (body) {
+      body.innerHTML =
+        '<div class="dp-market-empty">법원경매 물건이 아니어서 현황조사서를 조회할 수 없습니다.</div>';
+    }
+    return;
+  }
+  try {
+    renderTenants(await fetchTenants(cs, court));
+  } catch (err) {
+    if (body) {
+      body.innerHTML =
+        '<div class="dp-market-empty">현황조사서를 불러오지 못했습니다.</div>';
+    }
+  }
+}
+
+// ── 매각물건명세서 (법원 판단: 말소기준·확정·배당·대항력) ──────────────────────
+
+/** GET /api/listing/sale-spec → 매각물건명세서 텍스트 추출·파싱 결과 */
+async function fetchSaleSpec(cs, court, seq) {
+  const qs = new URLSearchParams({ cs, court, seq: seq || "1" }).toString();
+  const resp = await fetch(`/api/listing/sale-spec?${qs}`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+/** 매각물건명세서 분석 결과 렌더 (원문 발췌 — 우측 링크에서 원문 대조 가능) */
+function renderSaleSpec(data) {
+  const body = $("dp-salespec-body");
+  if (!body) return;
+  body.innerHTML = "";
+
+  if (!data || !data.has_data) {
+    body.innerHTML =
+      '<div class="dp-market-empty">매각물건명세서 정보를 불러오지 못했습니다. 원문은 우측 “매각물건명세서” 링크에서 확인하세요.</div>';
+    return;
+  }
+
+  // 핵심 사실: 말소기준권리 + 배당요구종기
+  const facts = [];
+  if (Array.isArray(data.priority) && data.priority.length) {
+    facts.push(["말소기준권리(최선순위 설정)", data.priority.join("   ·   ")]);
+  }
+  if (data.dividend_deadline) facts.push(["배당요구종기", data.dividend_deadline]);
+  if (facts.length) {
+    const kv = document.createElement("div");
+    kv.className = "dp-hosp-kv";
+    facts.forEach(([k, v]) => {
+      const row = document.createElement("div");
+      row.className = "dp-hosp-kv-row";
+      row.innerHTML =
+        `<span class="dp-hosp-kv-key">${escapeHtml(k)}</span>` +
+        `<span class="dp-hosp-kv-val">${escapeHtml(v)}</span>`;
+      kv.appendChild(row);
+    });
+    body.appendChild(kv);
+  }
+
+  // 임차인 (법원 명세서 기준: 전입·확정·보증금·배당요구가 한 줄에 담김)
+  const tenants = Array.isArray(data.tenants) ? data.tenants : [];
+  if (tenants.length) {
+    const wrap = document.createElement("div");
+    wrap.style.overflowX = "auto";
+    const table = document.createElement("table");
+    table.className = "dp-market-table";
+    table.innerHTML =
+      "<thead><tr><th>성명</th><th>점유·임대차 (전입·확정·보증금·배당요구)</th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    tenants.forEach((t) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td>${escapeHtml(t.name || "—")}</td>` +
+        `<td>${escapeHtml(t.detail || "—")}</td>`;
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    body.appendChild(wrap);
+  }
+
+  // 비고 (대항력·인수 주의 등 물건별 특이사항)
+  const notes = Array.isArray(data.notes) ? data.notes : [];
+  if (notes.length) {
+    const title = document.createElement("div");
+    title.className = "dp-subsection-title";
+    title.textContent = "비고";
+    body.appendChild(title);
+    const list = document.createElement("div");
+    list.className = "dp-rights-list";
+    notes.forEach((n) => {
+      const div = document.createElement("div");
+      div.className = "dp-rights-item";
+      div.textContent = n;
+      list.appendChild(div);
+    });
+    body.appendChild(list);
+  }
+}
+
+/** 매각물건명세서 비동기 로드 (논블로킹) */
+async function loadSaleSpec(cs, court, seq) {
+  const body = $("dp-salespec-body");
+  if (!cs || !court) {
+    if (body) body.innerHTML = "";
+    const blk = $("dp-salespec-block");
+    if (blk) blk.hidden = true;
+    return;
+  }
+  try {
+    renderSaleSpec(await fetchSaleSpec(cs, court, seq));
+  } catch (err) {
+    if (body) {
+      body.innerHTML =
+        '<div class="dp-market-empty">매각물건명세서를 분석하지 못했습니다. 원문은 우측 링크에서 확인하세요.</div>';
+    }
+  }
+}
+
 /** 권리분석 인수사항 */
 function renderRights(incumbrances) {
   const wrap = $("dp-rights-content");
@@ -645,7 +1081,10 @@ function renderMarketGroup(market, errors) {
 
   if (market.avg_price_per_m2 != null) addRow("평균 ㎡당가", won(market.avg_price_per_m2) + "/㎡");
   if (market.trade_count != null) addRow("거래 건수", `${market.trade_count}건`);
-  if (market.months != null) addRow("조회 기간", `최근 ${market.months}개월`);
+  if (market.months != null) {
+    const monthCount = Array.isArray(market.months) ? market.months.length : market.months;
+    addRow("조회 기간", `최근 ${monthCount}개월`);
+  }
 
   div.appendChild(kv);
   return div;
@@ -699,6 +1138,47 @@ function initHospitalAnalysis(addr) {
     } finally {
       btn.disabled = false;
       btn.textContent = "분석 실행";
+    }
+  });
+}
+
+// ── 공식 문서 딥링크 (매각물건명세서) ──────────────────────────────────────────
+
+/**
+ * 매각물건명세서 링크: 클릭 시 서버가 courtauction에서 신선한 전자문서 뷰어
+ * 딥링크(encParam)를 만들어 새 탭으로 연다. encParam이 단기 토큰이라 클릭 시점에
+ * 생성한다. 팝업 차단을 피하려고 클릭 동기 시점에 빈 탭을 먼저 연다.
+ */
+function initDocLinks(params) {
+  const el = $("dp-doc-sale-spec");
+  if (!el) return;
+  // cs/court가 없으면(법원물건 아님) 기존 courtauction 안내 링크 유지
+  if (!params.cs || !params.court) return;
+
+  el.addEventListener("click", async (e) => {
+    e.preventDefault();
+    // noopener를 주면 window.open이 null을 반환해 빈 탭이 남으므로, 참조를 받고
+    // opener를 수동으로 끊는다(신뢰된 정부 도메인으로만 이동).
+    const win = window.open("", "_blank");
+    if (win) {
+      try { win.opener = null; } catch (_) { /* noop */ }
+      win.document.write(
+        "<!DOCTYPE html><meta charset='utf-8'><title>매각물건명세서</title>" +
+        "<p style='font-family:sans-serif;padding:24px;color:#3d5a73'>매각물건명세서를 불러오는 중…</p>"
+      );
+    }
+    const fallback = "https://www.courtauction.go.kr";
+    try {
+      const qs = new URLSearchParams({
+        cs: params.cs, court: params.court, seq: params.seq || "1", kind: "sale_spec",
+      }).toString();
+      const resp = await fetch(`/api/listing/doc-link?${qs}`);
+      const data = await resp.json().catch(() => ({}));
+      const target = data && data.url ? data.url : fallback;
+      if (win) win.location.href = target;
+      else window.open(target, "_blank", "noopener");
+    } catch (err) {
+      if (win) win.location.href = fallback;
     }
   });
 }
@@ -775,6 +1255,7 @@ async function boot() {
   initLightbox();
 
   const params = getParams();
+  initDocLinks(params);
 
   if (!params.id) {
     showError("URL에 ?id= 파라미터가 없습니다", "목록 페이지에서 물건을 선택해 주세요.");
@@ -793,6 +1274,15 @@ async function boot() {
     renderAll(data);
     initHospitalAnalysis(data.addr_jibun || data.addr_road || "");
     elBody.hidden = false;
+
+    // 실거래 시세는 본문 표시 후 비동기로 채운다 (외부 API 지연이 페이지를 막지 않도록).
+    loadMarket(data.addr_jibun || data.addr_road || "");
+    // 주변 경매 통계도 비동기로 집계 (자체 수집 데이터).
+    loadNearbyStats(data.addr_jibun || data.addr_road || "", params.id);
+    // 임차인·점유관계(현황조사서)도 비동기로 로드.
+    loadTenants(params.cs, params.court);
+    // 매각물건명세서(법원 판단: 말소기준·확정·배당·대항력)도 비동기로 로드.
+    loadSaleSpec(params.cs, params.court, params.seq);
   } catch (err) {
     showError(
       "데이터를 불러올 수 없습니다",
