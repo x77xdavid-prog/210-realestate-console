@@ -41,7 +41,13 @@ def month_counts(courts: list[str], dates_fetcher: Callable[[str], list[str]],
 def _live_dates(body: dict[str, Any]) -> str:
     jar = CookieJar()
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-    opener.open(urllib.request.Request(INDEX_URL, headers={"User-Agent": _UA}), timeout=20).read(1024)
+    idx_headers = {
+        "User-Agent": _UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+        "Upgrade-Insecure-Requests": "1",
+    }
+    opener.open(urllib.request.Request(INDEX_URL, headers=idx_headers), timeout=20).read(1024)
     req = urllib.request.Request(DXDY_URL, data=json.dumps(body).encode("utf-8"),
         headers={"User-Agent": _UA, "Content-Type": "application/json;charset=UTF-8", "sc-userid": "SYSTEM"})
     with opener.open(req, timeout=20) as resp:

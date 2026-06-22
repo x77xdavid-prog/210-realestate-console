@@ -124,7 +124,13 @@ def fetch_detail(cs_no: str, cort_ofc_cd: str, gds_seq: str,
 def _live_detail(body: dict[str, Any]) -> str:
     jar = CookieJar()
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-    idx = urllib.request.Request(INDEX_URL, headers={"User-Agent": _UA})
+    idx_headers = {
+        "User-Agent": _UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.8",
+        "Upgrade-Insecure-Requests": "1",
+    }
+    idx = urllib.request.Request(INDEX_URL, headers=idx_headers)
     opener.open(idx, timeout=TIMEOUT).read(1024)
     req = urllib.request.Request(DETAIL_URL, data=json.dumps(body).encode("utf-8"),
         headers={"User-Agent": _UA, "Accept": "application/json",
