@@ -518,6 +518,25 @@ body::after {
   white-space: nowrap;
 }
 
+/* ===== 임차인 · 점유관계 ===== */
+.dp-src-tag {
+  display: inline-block;
+  font-size: .68rem;
+  font-weight: 600;
+  color: var(--teal);
+  background: var(--teal-soft);
+  border-radius: 99px;
+  padding: 2px 8px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.dp-tenant-meta {
+  padding: 12px 16px 4px;
+  font-size: .8rem;
+  color: var(--ink-faint);
+}
+
 /* ===== Rights / incumbrances ===== */
 .dp-rights-list {
   padding: 14px 18px;

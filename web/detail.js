@@ -574,6 +574,90 @@ async function loadNearbyStats(currentAddr, currentIdentity) {
   }
 }
 
+// ── 임차인 · 점유관계 (현황조사서) ─────────────────────────────────────────────
+
+/** GET /api/listing/tenants → 현황조사서 임대차/점유 데이터 */
+async function fetchTenants(cs, court) {
+  const qs = new URLSearchParams({ cs, court }).toString();
+  const resp = await fetch(`/api/listing/tenants?${qs}`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+/** 임차인 · 점유관계 렌더 */
+function renderTenants(data) {
+  const body = $("dp-tenants-body");
+  if (!body) return;
+  body.innerHTML = "";
+
+  const tenants = data && Array.isArray(data.tenants) ? data.tenants : [];
+  const survey = (data && data.survey) || {};
+
+  if (survey.sent_date || survey.exam_dates) {
+    const meta = document.createElement("div");
+    meta.className = "dp-tenant-meta";
+    const parts = [];
+    if (survey.sent_date) parts.push("송달일 " + fmtY(survey.sent_date));
+    if (survey.exam_dates) parts.push("조사일시 " + survey.exam_dates);
+    meta.textContent = parts.join("   ·   ");
+    body.appendChild(meta);
+  }
+
+  if (tenants.length === 0) {
+    const none = document.createElement("div");
+    none.className = "dp-market-empty";
+    none.textContent = "현황조사서상 임차인·점유자 정보가 없습니다.";
+    body.appendChild(none);
+    return;
+  }
+
+  const wrap = document.createElement("div");
+  wrap.style.overflowX = "auto";
+  const table = document.createElement("table");
+  table.className = "dp-market-table";
+  table.innerHTML =
+    "<thead><tr><th>점유자</th><th>호/부분</th><th>전입일</th><th>확정일자</th>" +
+    "<th>보증금</th><th>차임</th><th>비고</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  tenants.forEach((t) => {
+    const part = [t.address, t.part].filter(Boolean).join(" ");
+    const note = [t.possession, t.note].filter(Boolean).join(" / ");
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td>${escapeHtml(t.name || "—")}</td>` +
+      `<td>${escapeHtml(part || "—")}</td>` +
+      `<td>${escapeHtml(t.move_in || "—")}</td>` +
+      `<td>${escapeHtml(t.confirm || "—")}</td>` +
+      `<td>${escapeHtml(t.deposit || "—")}</td>` +
+      `<td>${escapeHtml(t.rent || "—")}</td>` +
+      `<td>${escapeHtml(note || "—")}</td>`;
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  body.appendChild(wrap);
+}
+
+/** 임차인 비동기 로드 (논블로킹) */
+async function loadTenants(cs, court) {
+  const body = $("dp-tenants-body");
+  if (!cs || !court) {
+    if (body) {
+      body.innerHTML =
+        '<div class="dp-market-empty">법원경매 물건이 아니어서 현황조사서를 조회할 수 없습니다.</div>';
+    }
+    return;
+  }
+  try {
+    renderTenants(await fetchTenants(cs, court));
+  } catch (err) {
+    if (body) {
+      body.innerHTML =
+        '<div class="dp-market-empty">현황조사서를 불러오지 못했습니다.</div>';
+    }
+  }
+}
+
 /** 권리분석 인수사항 */
 function renderRights(incumbrances) {
   const wrap = $("dp-rights-content");
@@ -1090,6 +1174,8 @@ async function boot() {
     loadMarket(data.addr_jibun || data.addr_road || "");
     // 주변 경매 통계도 비동기로 집계 (자체 수집 데이터).
     loadNearbyStats(data.addr_jibun || data.addr_road || "", params.id);
+    // 임차인·점유관계(현황조사서)도 비동기로 로드.
+    loadTenants(params.cs, params.court);
   } catch (err) {
     showError(
       "데이터를 불러올 수 없습니다",

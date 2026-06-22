@@ -250,6 +250,17 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 url = sale_spec_viewer_url(cs_no, cort, seq) if kind == "sale_spec" else None
                 self._send_json({"url": url})
                 return
+            if self.path.startswith("/api/listing/tenants"):
+                q = parse_qs(urlparse(self.path).query)
+                cs_no = (q.get("cs") or [""])[0]
+                cort = (q.get("court") or [""])[0]
+                if not cs_no or not cort:
+                    self._send_json({"tenants": [], "occupancy": [], "survey": {},
+                                     "error": "cs/court 필요"}, status=400)
+                    return
+                from realestate_alert.court_curst import fetch_tenants
+                self._send_json(fetch_tenants(cs_no, cort))
+                return
             if self.path.startswith("/api/photo"):
                 q = parse_qs(urlparse(self.path).query)
                 target = safe_photo_path(_photo_dir(config_path), (q.get("path") or [""])[0])
