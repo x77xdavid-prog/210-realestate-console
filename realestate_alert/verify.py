@@ -5,7 +5,12 @@ from typing import Any
 
 from realestate_alert.address import ParcelAddress, extract_dong, parse_parcel_address
 from realestate_alert.building_ledger import BuildingTitle, fetch_building_titles, primary_title
-from realestate_alert.land_info import LandSummary, fetch_land_summary, geocode_region_code
+from realestate_alert.land_info import (
+    LandSummary,
+    fetch_land_summary,
+    geocode_legal_district,
+    geocode_region_code,
+)
 from realestate_alert.market_price import MarketSummary, recent_deal_months, summarize_market
 from realestate_alert.models import Listing
 from realestate_alert.public_data import Fetcher, MissingApiKeyError, PublicDataError
@@ -30,10 +35,9 @@ def verify_address(
         "market": None,
         "errors": {},
     }
-    try:
-        parcel = parse_parcel_address(address)
-    except ValueError as error:
-        report["errors"]["address"] = str(error)
+    parcel = resolve_parcel(address, fetcher)
+    if parcel is None:
+        report["errors"]["address"] = f"주소를 해석할 수 없습니다(번지 포함 지번주소 필요): {address}"
         return report
     report["parcel"] = {
         "sigungu": parcel.sigungu,
@@ -58,6 +62,40 @@ def verify_address(
         report["market"] = _market_to_dict(market)
 
     return report
+
+
+def resolve_parcel(address: str, fetcher: Fetcher | None = None) -> ParcelAddress | None:
+    """주소 → ParcelAddress. 하드코딩 테이블 우선, 없으면 VWorld 법정동코드로 분해(전국).
+
+    건축물대장·토지·시세는 모두 코드(시군구/법정동/본번/부번)로 조회하므로,
+    VWorld level4LC(=PNU 형태)를 분해하면 테이블에 없는 전국 지번도 조회할 수 있다.
+    번지(본번)가 없어 19자리가 안 되면 None.
+    """
+    try:
+        return parse_parcel_address(address)
+    except ValueError:
+        pass
+    district = geocode_legal_district(address, fetcher=fetcher)
+    return _parcel_from_district(district, address) if district else None
+
+
+def _parcel_from_district(
+    district: dict[str, str], address: str
+) -> ParcelAddress | None:
+    code = str(district.get("code") or "")
+    # PNU는 정확히 19자리(시군구5+법정동5+필지구분1+본번4+부번4). 그 외는 거부
+    # (20자리 이상을 자르면 잘못된 본번/부번으로 엉뚱한 필지를 조회하게 됨).
+    if not code.isdigit() or len(code) != 19:
+        return None
+    return ParcelAddress(
+        sigungu=district.get("sigungu") or "",
+        dong=district.get("dong") or extract_dong(address) or "",
+        bun=int(code[11:15]),
+        ji=int(code[15:19]),
+        mountain=code[10] == "2",
+        sigungu_code=code[0:5],
+        bjdong_code=code[5:10],
+    )
 
 
 def market_for_address(

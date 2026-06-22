@@ -9,6 +9,7 @@ from realestate_alert.verify import (
     _resolve_market_region,
     enrich_listing,
     market_for_address,
+    resolve_parcel,
     verify_address,
 )
 
@@ -95,7 +96,7 @@ class ResolveMarketRegionTests(unittest.TestCase):
 
     def setUp(self):
         import realestate_alert.land_info as land_info
-        land_info._region_code_cache.clear()
+        land_info._district_cache.clear()
 
     def test_uses_table_without_external_call(self):
         def boom(url):
@@ -118,6 +119,58 @@ class ResolveMarketRegionTests(unittest.TestCase):
         with mock.patch.dict("os.environ", {"VWORLD_API_KEY": "k"}, clear=False):
             lawd, _ = _resolve_market_region("부산 해운대구 우동 1", lambda url: "{}")
         self.assertIsNone(lawd)
+
+
+class ResolveParcelTests(unittest.TestCase):
+    """전국 ParcelAddress 해석 — 테이블 우선, 없으면 VWorld level4LC 분해."""
+
+    def setUp(self):
+        import realestate_alert.land_info as land_info
+        land_info._district_cache.clear()
+
+    def test_table_first_no_external(self):
+        def boom(url):
+            raise AssertionError("테이블에 있으면 VWorld를 호출하면 안 된다")
+
+        parcel = resolve_parcel("서울 양천구 목동 917-9", boom)
+        self.assertEqual(parcel.sigungu_code, "11470")
+        self.assertEqual(parcel.pnu, "1147010100109170009")
+
+    def test_vworld_decomposes_full_code(self):
+        fetch = _vworld_code_fetcher("1129013300105080123")
+        # level2/level3도 함께
+        def fetch_named(url):
+            return json.dumps({"response": {"refined": {"structure": {
+                "level4LC": "1129013300105080123", "level2": "성북구", "level3": "정릉동"}}}})
+
+        with mock.patch.dict("os.environ", {"VWORLD_API_KEY": "k"}, clear=False):
+            parcel = resolve_parcel("서울특별시 성북구 정릉동 508-123", fetch_named)
+        self.assertEqual(parcel.sigungu_code, "11290")
+        self.assertEqual(parcel.bjdong_code, "13300")
+        self.assertEqual(parcel.bun, 508)
+        self.assertEqual(parcel.ji, 123)
+        self.assertFalse(parcel.mountain)
+        self.assertEqual(parcel.pnu, "1129013300105080123")
+        self.assertEqual(parcel.dong, "정릉동")
+
+    def test_short_code_returns_none(self):
+        with mock.patch.dict("os.environ", {"VWORLD_API_KEY": "k"}, clear=False):
+            parcel = resolve_parcel("서울특별시 성북구 정릉동", _vworld_code_fetcher("11290"))
+        self.assertIsNone(parcel)
+
+    def test_mountain_parcel_decomposed(self):
+        # 필지구분(11번째 자리)=2 → 산
+        with mock.patch.dict("os.environ", {"VWORLD_API_KEY": "k"}, clear=False):
+            parcel = resolve_parcel("강원특별자치도 어딘가 산1", _vworld_code_fetcher("5113025025200010000"))
+        self.assertTrue(parcel.mountain)
+        self.assertEqual(parcel.plat_gb_cd, "1")  # 산=1
+        self.assertEqual(parcel.bun, 1)
+        self.assertEqual(parcel.pnu, "5113025025200010000")
+
+    def test_twenty_digit_code_rejected(self):
+        with mock.patch.dict("os.environ", {"VWORLD_API_KEY": "k"}, clear=False):
+            parcel = resolve_parcel("아무데나 1", _vworld_code_fetcher("11290133001050801234"))
+        self.assertIsNone(parcel)  # 19자리 정확 일치만 허용
 
 
 class EnrichListingTests(unittest.TestCase):

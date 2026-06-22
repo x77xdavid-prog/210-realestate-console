@@ -515,7 +515,18 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 months = body.get("months", 6)
                 if not isinstance(months, int) or not (1 <= months <= 12):
                     months = 6
-                self._send_json(verify_address(address, market_months=months))
+                # 건축물대장·토지·시세·심평원 = 외부 4호출. 캐시·동시성 가드 적용
+                # (/api/market 등과 동일). 주소 해석된 리포트만 캐시.
+                report = _ext_fetch(
+                    f"verify:{address}:{months}",
+                    lambda: _verify_report(address, months),
+                    lambda r: bool(r) and "address" not in (r.get("errors") or {}),
+                )
+                if report is None:
+                    report = {"address": address, "market": None, "building": None,
+                              "land": None, "medical": None,
+                              "errors": {"busy": "검증이 혼잡합니다. 잠시 후 다시 시도하세요."}}
+                self._send_json(report)
                 return
             if self.path == "/api/market":
                 body = self._read_json_body()
@@ -971,6 +982,13 @@ def _utc_now_iso() -> str:
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _verify_report(address: str, months: int) -> dict[str, Any]:
+    """검증 리포트(건축물대장·토지·시세) + 주변 병원·약국(심평원)을 합쳐 만든다."""
+    report = verify_address(address, market_months=months)
+    _attach_medical_data(report)
+    return report
 
 
 def _attach_medical_data(report: dict[str, Any]) -> None:
