@@ -14,6 +14,9 @@ from realestate_alert.onbid import OnbidSource
 from realestate_alert.sources import JsonFileSource, ListingSource
 from realestate_alert.store import ListingStore
 
+# 병원 개원 적합 용도 키워드 — 법원경매 물건 중 상세 보강 대상 판별
+_HOSPITAL_FIT_KEYWORDS = ("근린", "상가", "업무", "의료", "사무", "점포")
+
 
 @dataclass(frozen=True)
 class RunResult:
@@ -78,6 +81,62 @@ def _safe_fetch(source: ListingSource) -> list[Listing]:
         return []
 
 
+def is_court_hospital_candidate(listing: Listing) -> bool:
+    """법원경매 물건 중 병원 개원 적합 후보인지 판별한다.
+
+    - source가 "court"이어야 한다.
+    - cs_no(사건번호)가 있어야 한다(상세 조회 키).
+    - 용도/제목에 병원 개원 가능 키워드(근린/상가/업무/의료/사무/점포)가 포함되어야 한다.
+    """
+    if listing.source != "court":
+        return False
+    if not listing.cs_no:
+        return False
+    combined = f"{listing.usage or ''} {listing.title}"
+    return any(kw in combined for kw in _HOSPITAL_FIT_KEYWORDS)
+
+
+def enrich_candidates(
+    listings,
+    store,
+    photo_dir,
+    is_candidate,
+    fetcher=None,
+    sleep=None,
+) -> int:
+    """후보(court + 병원 적합)만 상세 보강한다. 이미 캐시된 건 건너뜀. 실패는 흡수.
+
+    Args:
+        listings: Listing 목록.
+        store: ListingStore 인스턴스.
+        photo_dir: 사진 저장 디렉터리(Path).
+        is_candidate: (Listing) -> bool 후보 판별 함수.
+        fetcher: court_auction_detail.fetch_detail에 주입할 fetcher(테스트용).
+        sleep: 호출 간격 조절 함수. 없으면 간격 없음.
+
+    Returns:
+        보강에 성공한 건수.
+    """
+    from realestate_alert.web_server import build_detail_payload
+    enriched = 0
+    for ls in listings:
+        if not is_candidate(ls):
+            continue
+        if store.get_detail(ls.identity):   # 이미 캐시된 건 건너뜀
+            continue
+        try:
+            build_detail_payload(
+                store, ls.identity, ls.cs_no, ls.cort_ofc_cd, ls.gds_seq,
+                photo_dir=photo_dir, fetcher=fetcher,
+            )
+            enriched += 1
+            if sleep:
+                sleep()
+        except Exception:  # noqa: BLE001 — 외부 호출 실패는 흡수, 다음 주기에 재시도
+            continue
+    return enriched
+
+
 def run_once(config: AppConfig, snapshot: ListingSnapshot | None = None) -> RunResult:
     store = ListingStore(config.database_path)
     store.initialize()
@@ -90,6 +149,23 @@ def run_once(config: AppConfig, snapshot: ListingSnapshot | None = None) -> RunR
 
     for notifier in notifiers:
         notifier.notify(new_listings)
+
+    # 법원경매 후보 물건만 상세 보강(신규/관심 한정 정책은 enrich_candidates 내부에서 캐시로 처리).
+    # 실패해도 알림·결과에 영향 없이 흡수한다.
+    try:
+        import time as _time
+        from pathlib import Path as _Path
+        photo_dir = config.database_path.parent / "data" / "photos"
+        _Path(photo_dir).mkdir(parents=True, exist_ok=True)
+        enrich_candidates(
+            snapshot.fetched,
+            store,
+            photo_dir,
+            is_candidate=is_court_hospital_candidate,
+            sleep=lambda: _time.sleep(1),
+        )
+    except Exception:  # noqa: BLE001 — 보강 실패는 흡수
+        pass
 
     return RunResult(
         fetched_count=snapshot.fetched_count,

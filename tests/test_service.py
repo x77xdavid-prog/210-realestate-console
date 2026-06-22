@@ -4,7 +4,21 @@ import unittest
 from pathlib import Path
 
 from realestate_alert.config import load_config
-from realestate_alert.service import collect_listings, run_once
+from realestate_alert.models import Listing
+from realestate_alert.service import collect_listings, run_once, enrich_candidates, is_court_hospital_candidate
+from realestate_alert.store import ListingStore
+
+
+def _make_listing(**kwargs) -> Listing:
+    defaults = dict(
+        source="court", external_id="t001", title="근린생활시설",
+        location="서울 양천구", deposit=0, monthly_rent=0, area_m2=80.0,
+        floor="2층", premium=None, url="https://example.test/t001",
+        usage="근린생활시설", cs_no="2024타경58264",
+        cort_ofc_cd="B000103", gds_seq="1",
+    )
+    defaults.update(kwargs)
+    return Listing(**defaults)
 
 
 def _write_two_source_config(root: Path) -> Path:
@@ -155,3 +169,117 @@ class ServiceTests(unittest.TestCase):
 
         self.assertEqual([listing.external_id for listing in first_result.notified], ["match"])
         self.assertEqual(second_result.notified, [])
+
+
+class IsCourtHospitalCandidateTests(unittest.TestCase):
+    def test_court_with_cs_no_and_commercial_usage_returns_true(self):
+        ls = _make_listing(source="court", usage="근린생활시설", cs_no="2024타경58264")
+        self.assertTrue(is_court_hospital_candidate(ls))
+
+    def test_court_sangga_usage_returns_true(self):
+        ls = _make_listing(source="court", usage="상가", cs_no="2024타경00001")
+        self.assertTrue(is_court_hospital_candidate(ls))
+
+    def test_court_eommu_usage_returns_true(self):
+        ls = _make_listing(source="court", usage="업무시설", cs_no="2024타경00002")
+        self.assertTrue(is_court_hospital_candidate(ls))
+
+    def test_onbid_returns_false(self):
+        ls = _make_listing(source="onbid", usage="근린생활시설", cs_no="2024타경58264")
+        self.assertFalse(is_court_hospital_candidate(ls))
+
+    def test_court_apartment_returns_false(self):
+        ls = _make_listing(source="court", usage="아파트", title="아파트 2층", cs_no="2024타경00003")
+        self.assertFalse(is_court_hospital_candidate(ls))
+
+    def test_court_without_cs_no_returns_false(self):
+        ls = _make_listing(source="court", usage="근린생활시설", cs_no=None)
+        self.assertFalse(is_court_hospital_candidate(ls))
+
+
+class EnrichCandidatesTests(unittest.TestCase):
+    def _make_store(self, tmp_dir: str) -> ListingStore:
+        db_path = Path(tmp_dir) / "test.sqlite3"
+        store = ListingStore(db_path)
+        store.initialize()
+        return store
+
+    def test_fetcher_called_once_for_fresh_court_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._make_store(tmp)
+            photo_dir = Path(tmp) / "photos"
+            photo_dir.mkdir()
+            call_count = {"n": 0}
+
+            def fake_fetcher(params):
+                call_count["n"] += 1
+                return json.dumps({"data": {"dma_result": {"csPicLst": []}}})
+
+            ls = _make_listing()
+            count = enrich_candidates(
+                [ls], store, photo_dir,
+                is_candidate=lambda l: l.source == "court",
+                fetcher=fake_fetcher,
+            )
+            self.assertEqual(call_count["n"], 1)
+            self.assertEqual(count, 1)
+
+    def test_fetcher_not_called_for_non_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._make_store(tmp)
+            photo_dir = Path(tmp) / "photos"
+            photo_dir.mkdir()
+            call_count = {"n": 0}
+
+            def fake_fetcher(params):
+                call_count["n"] += 1
+                return json.dumps({"data": {"dma_result": {"csPicLst": []}}})
+
+            ls = _make_listing(source="onbid")
+            count = enrich_candidates(
+                [ls], store, photo_dir,
+                is_candidate=lambda l: l.source == "court",
+                fetcher=fake_fetcher,
+            )
+            self.assertEqual(call_count["n"], 0)
+            self.assertEqual(count, 0)
+
+    def test_fetcher_not_called_when_already_cached(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._make_store(tmp)
+            photo_dir = Path(tmp) / "photos"
+            photo_dir.mkdir()
+            ls = _make_listing()
+            # Pre-populate cache
+            store.upsert_detail(ls.identity, {"identity": ls.identity, "cached": True})
+            call_count = {"n": 0}
+
+            def fake_fetcher(params):
+                call_count["n"] += 1
+                return json.dumps({"data": {"dma_result": {"csPicLst": []}}})
+
+            count = enrich_candidates(
+                [ls], store, photo_dir,
+                is_candidate=lambda l: l.source == "court",
+                fetcher=fake_fetcher,
+            )
+            self.assertEqual(call_count["n"], 0)
+            self.assertEqual(count, 0)
+
+    def test_failure_is_absorbed_and_continues(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._make_store(tmp)
+            photo_dir = Path(tmp) / "photos"
+            photo_dir.mkdir()
+
+            def boom_fetcher(params):
+                raise RuntimeError("network error")
+
+            ls = _make_listing()
+            # Should not raise, count = 0 (failed)
+            count = enrich_candidates(
+                [ls], store, photo_dir,
+                is_candidate=lambda l: l.source == "court",
+                fetcher=boom_fetcher,
+            )
+            self.assertEqual(count, 0)
