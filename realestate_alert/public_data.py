@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -11,6 +12,11 @@ from xml.etree import ElementTree
 DATA_GO_KR_KEY_ENV = "DATA_GO_KR_API_KEY"
 VWORLD_KEY_ENV = "VWORLD_API_KEY"
 REQUEST_TIMEOUT_SECONDS = 15
+# 게이트웨이 일시 오류(502/503/504)·네트워크 오류는 짧게 재시도한다 — VWorld·data.go.kr
+# 게이트웨이가 간헐적으로 502를 돌려줘 단발성 실패가 사용자에게 노출되던 문제 완화.
+RETRY_STATUSES = frozenset({502, 503, 504})
+HTTP_MAX_RETRIES = 2  # 총 시도 = 3회
+HTTP_RETRY_BACKOFF_SECONDS = 0.6
 
 # fetcher(url) -> 응답 본문 문자열. 테스트에서 가짜 응답 주입에 사용한다.
 Fetcher = Callable[[str], str]
@@ -53,11 +59,23 @@ def http_get(url: str, accept: str | None = None) -> str:
         # 건축HUB 등 일부 게이트웨이는 Accept 헤더가 없으면 빈 본문(200)을 반환한다.
         headers["Accept"] = accept
     request = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-            return response.read().decode("utf-8", errors="replace")
-    except urllib.error.URLError as error:
-        raise PublicDataError(f"공공 API 호출 실패: {url.split('?')[0]} ({error})") from error
+    for attempt in range(HTTP_MAX_RETRIES + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                return response.read().decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as error:
+            # 5xx 게이트웨이 오류만 재시도. 4xx(키·요청 오류)는 즉시 실패.
+            if error.code in RETRY_STATUSES and attempt < HTTP_MAX_RETRIES:
+                time.sleep(HTTP_RETRY_BACKOFF_SECONDS * (attempt + 1))
+                continue
+            raise PublicDataError(f"공공 API 호출 실패: {url.split('?')[0]} ({error})") from error
+        except urllib.error.URLError as error:
+            # 타임아웃·연결 오류 등 네트워크 일시 오류도 재시도.
+            if attempt < HTTP_MAX_RETRIES:
+                time.sleep(HTTP_RETRY_BACKOFF_SECONDS * (attempt + 1))
+                continue
+            raise PublicDataError(f"공공 API 호출 실패: {url.split('?')[0]} ({error})") from error
+    raise PublicDataError(f"공공 API 호출 실패: {url.split('?')[0]} (재시도 초과)")
 
 
 def xml_fetcher(url: str) -> str:
