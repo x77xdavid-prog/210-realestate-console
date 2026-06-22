@@ -247,42 +247,6 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 self.send_header("Content-Type", "image/jpeg")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers(); self.wfile.write(data); return
-            if self.path.startswith("/api/calendar"):
-                q = parse_qs(urlparse(self.path).query)
-                from datetime import datetime as _dt
-                ym = (q.get("ym") or [_dt.now().strftime("%Y%m")])[0]
-
-                def _make_calendar_compute(ym_val):
-                    def compute():
-                        try:
-                            from realestate_alert import court_calendar, court_auction
-                            courts = list(court_auction.COURT_CODES.values())
-
-                            def count_fetcher(court, ymd):
-                                from realestate_alert.court_auction import count_for_date
-                                return count_for_date(court, ymd)
-
-                            raw = court_calendar.month_counts(
-                                courts,
-                                dates_fetcher=court_calendar.dates_of,
-                                count_fetcher=count_fetcher,
-                            )
-                            # Filter to requested month
-                            days = {}
-                            courts_for = {}
-                            for ymd, slot in raw.items():
-                                if ymd[:6] == ym_val:
-                                    day = ymd[6:8]
-                                    days[day] = slot.get("__total__", 0)
-                                    courts_for[ymd] = {k: v for k, v in slot.items() if k != "__total__"}
-                            return {"ym": ym_val, "days": days, "courts_for": courts_for}
-                        except Exception:  # noqa: BLE001
-                            return {"ym": ym_val, "days": {}, "courts_for": {}}
-                    return compute
-
-                payload = build_calendar_payload(_store(config_path), ym, _make_calendar_compute(ym))
-                self._send_json(payload)
-                return
             if self.path == "/api/diagnostics":
                 self._send_json(_diagnostics_payload(config_path))
                 return
@@ -838,15 +802,6 @@ def serve(config_path: Path, web_root: Path, host: str = "127.0.0.1", port: int 
         server.server_close()
 
 
-def build_calendar_payload(store, ym: str, compute):
-    cached = store.get_calendar(ym)
-    if cached:
-        return cached
-    data = compute()
-    store.save_calendar(ym, data)
-    return data
-
-
 def build_detail_payload(store, identity, cs_no, cort_ofc_cd, gds_seq, photo_dir, fetcher=None):
     from realestate_alert.court_auction_detail import fetch_detail, parse_detail
     from realestate_alert.photos import save_photos
@@ -967,9 +922,10 @@ def _listings_payload(config_path: Path) -> dict[str, Any]:
     store = ListingStore(config.database_path)
     first_seen = store.first_seen_map()
     favorites = store.favorite_identities()
+    details = store.get_all_details()
 
     def to_dict(listing: Listing, is_match: bool) -> dict[str, Any]:
-        detail = store.get_detail(listing.identity) if listing.source == "court" else None
+        detail = details.get(listing.identity) if listing.source == "court" else None
         return _listing_to_dict(
             listing,
             is_new=store.is_recent(first_seen.get(listing.identity)),
@@ -1016,12 +972,12 @@ def _card_extras(listing: Listing, detail: dict[str, Any] | None = None) -> dict
     if listing.source == "court" and detail:
         photos = detail.get("photos") or []
         if photos:
-            thumbnail_url = f"/api/photo?path={photos[0]['file']}"
+            thumbnail_url = f"/api/photo?path={quote(photos[0]['file'])}"
         photo_count = len(photos)
         from realestate_alert.court_auction_detail import extract_incumbrance_tags
         tags = list(extract_incumbrance_tags(" ".join(detail.get("incumbrances") or [])))
     elif listing.thumbnail_path:
-        thumbnail_url = f"/api/photo?path={listing.thumbnail_path}"
+        thumbnail_url = f"/api/photo?path={quote(listing.thumbnail_path)}"
     detail_link = (
         {
             "id": listing.identity,

@@ -131,3 +131,18 @@ class ChecklistReviewStoreTests(unittest.TestCase):
             got = store.get_detail("court:x-1")
             self.assertEqual(got["appraisal"], 2)
             self.assertIsNone(store.get_detail("court:none"))
+
+    def test_get_all_details_returns_all_and_empty_when_none(self):
+        import tempfile
+        from pathlib import Path
+        from realestate_alert.store import ListingStore
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ListingStore(Path(tmp) / "t.db")
+            store.initialize()
+            self.assertEqual(store.get_all_details(), {})
+            store.upsert_detail("court:a-1", {"appraisal": 100})
+            store.upsert_detail("court:b-2", {"appraisal": 200})
+            all_details = store.get_all_details()
+            self.assertEqual(len(all_details), 2)
+            self.assertEqual(all_details["court:a-1"]["appraisal"], 100)
+            self.assertEqual(all_details["court:b-2"]["appraisal"], 200)

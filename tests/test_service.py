@@ -223,6 +223,7 @@ class EnrichCandidatesTests(unittest.TestCase):
             )
             self.assertEqual(call_count["n"], 1)
             self.assertEqual(count, 1)
+            self.assertIsNotNone(store.get_detail(ls.identity))
 
     def test_fetcher_not_called_for_non_candidate(self):
         with tempfile.TemporaryDirectory() as tmp:
