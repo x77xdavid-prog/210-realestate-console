@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>물건 상세 — 병원매물 자동검색</title>
+  <link rel="stylesheet" href="detail.css" />
+</head>
+<body>
+
+  <!-- ===== Header ===== -->
+  <header class="dp-header">
+    <a href="/" class="dp-back" aria-label="목록으로 돌아가기">
+      <span aria-hidden="true">←</span> 목록
+    </a>
+    <div class="dp-brand">
+      병원매물 자동검색 <span>·</span> 물건 상세
+    </div>
+    <div class="dp-header-spacer"></div>
+  </header>
+
+  <!-- ===== Case header (filled by JS) ===== -->
+  <div id="dp-case-header" class="dp-case-header" hidden>
+    <div class="dp-case-meta">
+      <span id="dp-court-badge" class="dp-badge"></span>
+      <span id="dp-case-no" class="dp-case-no"></span>
+      <span id="dp-case-type" class="dp-case-type"></span>
+    </div>
+    <div id="dp-addr-road" class="dp-case-addr-road"></div>
+    <div id="dp-addr-jibun" class="dp-case-addr-jibun"></div>
+  </div>
+
+  <!-- ===== Loading state ===== -->
+  <div id="dp-loading" class="dp-state-center">
+    <div class="dp-spinner"></div>
+    <div>물건 정보를 불러오는 중…</div>
+  </div>
+
+  <!-- ===== Error state ===== -->
+  <div id="dp-error" class="dp-state-center" hidden>
+    <div class="dp-error-icon">⚠️</div>
+    <div class="dp-error-msg" id="dp-error-msg">데이터를 불러올 수 없습니다</div>
+    <div class="dp-error-sub" id="dp-error-sub"></div>
+  </div>
+
+  <!-- ===== 3-column body ===== -->
+  <div id="dp-body" class="dp-body" hidden>
+
+    <!-- Left rail: sticky tab nav -->
+    <nav class="dp-left-rail" aria-label="섹션 내비게이션">
+      <div class="dp-tab-nav" id="dp-tab-nav">
+        <button class="dp-tab-btn dp-tab-active" data-target="sec-basic">기본내역</button>
+        <button class="dp-tab-btn" data-target="sec-status">현황정보</button>
+        <button class="dp-tab-btn" data-target="sec-presented">제시외/건물</button>
+        <button class="dp-tab-btn" data-target="sec-register">등기/지번</button>
+        <button class="dp-tab-btn" data-target="sec-price">시세분석</button>
+        <button class="dp-tab-btn" data-target="sec-misc">기타</button>
+      </div>
+    </nav>
+
+    <!-- Center: main content -->
+    <main class="dp-main" id="dp-main">
+
+      <!-- Gallery + Map panel -->
+      <section class="dp-panel dp-section-anchor" id="sec-gallery">
+        <div class="dp-panel-title">사진 및 위치</div>
+        <div class="dp-gallery" id="dp-gallery">
+          <div class="dp-gallery-empty">사진 없음</div>
+        </div>
+        <div class="dp-map-wrap" id="dp-map-wrap">
+          <!-- filled by JS -->
+        </div>
+      </section>
+
+      <!-- 기본내역 -->
+      <section class="dp-panel dp-section-anchor" id="sec-basic">
+        <div class="dp-panel-title">기본내역</div>
+        <table class="dp-info-table" id="dp-basic-table">
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <!-- 시세분석 (price cards) -->
+      <section class="dp-panel dp-section-anchor" id="sec-price">
+        <div class="dp-panel-title">가격 · 시세</div>
+        <div class="dp-price-cards" id="dp-price-cards"></div>
+      </section>
+
+      <!-- 권리분석 인수사항 -->
+      <section class="dp-panel dp-section-anchor" id="sec-rights">
+        <div class="dp-panel-title">권리분석 · 인수사항</div>
+        <div id="dp-rights-content"></div>
+      </section>
+
+      <!-- 기일내역 -->
+      <section class="dp-panel dp-section-anchor" id="sec-bid">
+        <div class="dp-panel-title">기일내역</div>
+        <div style="overflow-x:auto;">
+          <table class="dp-bid-table" id="dp-bid-table">
+            <thead>
+              <tr>
+                <th>기일</th>
+                <th>최저가</th>
+                <th>결과</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 현황정보 -->
+      <section class="dp-panel dp-section-anchor" id="sec-status">
+        <div class="dp-panel-title">현황정보</div>
+        <div class="dp-status-list" id="dp-status-list"></div>
+      </section>
+
+      <!-- 제시외/건물 -->
+      <section class="dp-panel dp-section-anchor" id="sec-presented" hidden>
+        <div class="dp-panel-title">제시외건물 · 건물상세</div>
+
+        <!-- 제시외건물 table -->
+        <div id="dp-presented-wrap" hidden>
+          <div class="dp-panel-title" style="font-size:.78rem;padding:12px 16px 8px;border-bottom:none;">제시외건물</div>
+          <div style="overflow-x:auto;">
+            <table class="dp-gen-table" id="dp-presented-table">
+              <thead>
+                <tr>
+                  <th>용도</th><th>구조</th><th>면적</th><th>감정가</th><th>비고</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 건물상세 -->
+        <div id="dp-bldg-wrap" hidden>
+          <div class="dp-panel-title" style="font-size:.78rem;padding:12px 16px 8px;border-bottom:none;">건물상세</div>
+          <div class="dp-bldg-list" id="dp-bldg-list"></div>
+        </div>
+      </section>
+
+      <!-- 등기/지번 -->
+      <section class="dp-panel dp-section-anchor" id="sec-register" hidden>
+        <div class="dp-panel-title">지번 목록</div>
+        <div style="overflow-x:auto;">
+          <table class="dp-gen-table" id="dp-jibun-table">
+            <thead>
+              <tr>
+                <th>지번</th><th>주소</th><th>도로명</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 기타 (물건비고) -->
+      <section class="dp-panel dp-section-anchor" id="sec-misc" hidden>
+        <div class="dp-panel-title">물건비고</div>
+        <div class="dp-notice-text" id="dp-notice-text"></div>
+      </section>
+
+    </main>
+
+    <!-- Right rail: doc links -->
+    <aside class="dp-right-rail" aria-label="대법원 문서">
+      <div class="dp-doc-panel">
+        <div class="dp-doc-title">대법원 문서</div>
+        <div class="dp-doc-links">
+          <a class="dp-doc-link" id="dp-doc-root"
+             href="https://www.courtauction.go.kr" target="_blank" rel="noopener noreferrer">
+            <span class="dp-doc-link-icon">🏛️</span>
+            법원경매정보
+          </a>
+          <a class="dp-doc-link"
+             href="https://www.courtauction.go.kr" target="_blank" rel="noopener noreferrer">
+            <span class="dp-doc-link-icon">📄</span>
+            매각물건명세서
+          </a>
+          <a class="dp-doc-link"
+             href="https://www.courtauction.go.kr" target="_blank" rel="noopener noreferrer">
+            <span class="dp-doc-link-icon">📊</span>
+            감정평가서
+          </a>
+          <a class="dp-doc-link"
+             href="https://www.courtauction.go.kr" target="_blank" rel="noopener noreferrer">
+            <span class="dp-doc-link-icon">🔍</span>
+            현황조사서
+          </a>
+          <a class="dp-doc-link"
+             href="https://www.courtauction.go.kr" target="_blank" rel="noopener noreferrer">
+            <span class="dp-doc-link-icon">📋</span>
+            등기부등본
+          </a>
+          <a class="dp-doc-link"
+             href="https://www.courtauction.go.kr" target="_blank" rel="noopener noreferrer">
+            <span class="dp-doc-link-icon">🏗️</span>
+            건축물대장
+          </a>
+        </div>
+        <div class="dp-doc-note">
+          법원경매정보(courtauction.go.kr)에서<br>
+          사건번호로 개별 열람 가능합니다.
+        </div>
+      </div>
+    </aside>
+
+  </div><!-- /dp-body -->
+
+  <!-- Lightbox -->
+  <div id="dp-lightbox" class="dp-lightbox" hidden>
+    <button class="dp-lightbox-close" id="dp-lightbox-close" aria-label="닫기">×</button>
+    <img id="dp-lightbox-img" src="" alt="확대 사진" />
+  </div>
+
+  <script src="detail.js"></script>
+</body>
+</html>
