@@ -474,6 +474,50 @@ body::after {
   white-space: nowrap;
 }
 
+/* ===== 주변 통계 용도 분포 ===== */
+.dp-usage-dist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 16px 14px;
+}
+
+.dp-usage-row {
+  display: grid;
+  grid-template-columns: 96px 1fr 44px;
+  align-items: center;
+  gap: 10px;
+  font-size: .82rem;
+}
+
+.dp-usage-name {
+  color: var(--ink-soft);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dp-usage-bar {
+  height: 10px;
+  background: var(--surface-soft);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.dp-usage-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--teal), var(--teal-bright));
+  border-radius: 99px;
+}
+
+.dp-usage-count {
+  color: var(--ink-faint);
+  text-align: right;
+  white-space: nowrap;
+}
+
 /* ===== Rights / incumbrances ===== */
 .dp-rights-list {
   padding: 14px 18px;

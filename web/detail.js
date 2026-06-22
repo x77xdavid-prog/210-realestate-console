@@ -440,6 +440,140 @@ async function loadMarket(address) {
   }
 }
 
+// ── 주변 경매 통계 (자체 수집 데이터 집계) ─────────────────────────────────────
+
+/** 한국 주소에서 구/군·동/읍/면 토큰 추출 */
+function parseRegion(addr) {
+  const s = String(addr || "");
+  const guMatch = s.match(/([가-힣]{1,6}(?:구|군))(?:\s|$)/);
+  const dongMatch = s.match(/([가-힣]{1,6}(?:동|읍|면))(?:\s|\d|$)/);
+  return {
+    gu: guMatch ? guMatch[1] : "",
+    dong: dongMatch ? dongMatch[1] : "",
+  };
+}
+
+/** GET /api/listings → 매물 풀 (matched + unmatched 합산) */
+async function fetchListings() {
+  const resp = await fetch("/api/listings");
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  const a = Array.isArray(data.listings) ? data.listings : [];
+  const b = Array.isArray(data.unmatched_listings) ? data.unmatched_listings : [];
+  return a.concat(b);
+}
+
+/**
+ * 현재 물건과 같은 구의 경매 물건 통계 집계
+ * @returns {object|null}  null = 지역 파싱 실패
+ */
+function computeNearbyStats(listings, currentAddr, currentIdentity) {
+  const cur = parseRegion(currentAddr);
+  if (!cur.gu) return null;
+
+  const pool = (Array.isArray(listings) ? listings : []).filter(
+    (l) => l && l.identity !== currentIdentity && parseRegion(l.location).gu === cur.gu
+  );
+  if (pool.length === 0) return { gu: cur.gu, dong: cur.dong, count: 0 };
+
+  const sameDong = cur.dong
+    ? pool.filter((l) => parseRegion(l.location).dong === cur.dong).length
+    : 0;
+
+  const drops = [];
+  pool.forEach((l) => {
+    const ap = Number(l.appraisal_price);
+    const mb = Number(l.min_bid_price);
+    if (ap > 0 && mb > 0) drops.push((1 - mb / ap) * 100);
+  });
+  const avgDrop = drops.length ? drops.reduce((a, b) => a + b, 0) / drops.length : null;
+
+  const fails = pool.map((l) => Number(l.fail_count)).filter((n) => !isNaN(n));
+  const avgFail = fails.length ? fails.reduce((a, b) => a + b, 0) / fails.length : null;
+
+  const usageMap = {};
+  pool.forEach((l) => {
+    const u = ((l.usage || l.property_type || "기타") + "").trim() || "기타";
+    usageMap[u] = (usageMap[u] || 0) + 1;
+  });
+  const usageDist = Object.entries(usageMap)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  return { gu: cur.gu, dong: cur.dong, count: pool.length, sameDong, avgDrop, avgFail, usageDist };
+}
+
+/** 주변 통계 렌더 */
+function renderNearbyStats(stats) {
+  const body = $("dp-nearby-body");
+  if (!body) return;
+  body.innerHTML = "";
+
+  if (!stats || !stats.gu) {
+    body.innerHTML =
+      '<div class="dp-market-empty">지역 정보를 확인할 수 없어 통계를 낼 수 없습니다.</div>';
+    return;
+  }
+  if (stats.count === 0) {
+    body.innerHTML = `<div class="dp-market-empty">수집된 ${escapeHtml(stats.gu)} 인근 경매 물건이 없습니다.</div>`;
+    return;
+  }
+
+  const stat = document.createElement("div");
+  stat.className = "dp-market-stats";
+  const rows = [
+    [`${stats.gu} 경매물건`, stats.count + "건"],
+    [`같은 동(${stats.dong || "—"})`, stats.dong ? stats.sameDong + "건" : "—"],
+    ["평균 하락률", stats.avgDrop != null ? `−${Math.round(stats.avgDrop)}%` : "—"],
+    ["평균 유찰횟수", stats.avgFail != null ? stats.avgFail.toFixed(1) + "회" : "—"],
+  ];
+  rows.forEach(([label, val]) => {
+    const card = document.createElement("div");
+    card.className = "dp-market-stat";
+    card.innerHTML =
+      `<div class="dp-market-stat-val">${escapeHtml(val)}</div>` +
+      `<div class="dp-market-stat-label">${escapeHtml(label)}</div>`;
+    stat.appendChild(card);
+  });
+  body.appendChild(stat);
+
+  const dist = Array.isArray(stats.usageDist) ? stats.usageDist : [];
+  if (dist.length) {
+    const title = document.createElement("div");
+    title.className = "dp-subsection-title";
+    title.textContent = "용도별 분포";
+    body.appendChild(title);
+
+    const wrap = document.createElement("div");
+    wrap.className = "dp-usage-dist";
+    const max = dist[0][1] || 1;
+    dist.forEach(([usage, n]) => {
+      const row = document.createElement("div");
+      row.className = "dp-usage-row";
+      const pct = Math.max(6, Math.round((n / max) * 100));
+      row.innerHTML =
+        `<span class="dp-usage-name">${escapeHtml(usage)}</span>` +
+        `<span class="dp-usage-bar"><span class="dp-usage-fill" style="width:${pct}%"></span></span>` +
+        `<span class="dp-usage-count">${escapeHtml(String(n))}건</span>`;
+      wrap.appendChild(row);
+    });
+    body.appendChild(wrap);
+  }
+}
+
+/** 주변 통계 비동기 로드 (논블로킹) */
+async function loadNearbyStats(currentAddr, currentIdentity) {
+  const body = $("dp-nearby-body");
+  try {
+    const listings = await fetchListings();
+    renderNearbyStats(computeNearbyStats(listings, currentAddr, currentIdentity));
+  } catch (err) {
+    if (body) {
+      body.innerHTML = '<div class="dp-market-empty">주변 통계를 불러오지 못했습니다.</div>';
+    }
+  }
+}
+
 /** 권리분석 인수사항 */
 function renderRights(incumbrances) {
   const wrap = $("dp-rights-content");
@@ -912,6 +1046,8 @@ async function boot() {
 
     // 실거래 시세는 본문 표시 후 비동기로 채운다 (외부 API 지연이 페이지를 막지 않도록).
     loadMarket(data.addr_jibun || data.addr_road || "");
+    // 주변 경매 통계도 비동기로 집계 (자체 수집 데이터).
+    loadNearbyStats(data.addr_jibun || data.addr_road || "", params.id);
   } catch (err) {
     showError(
       "데이터를 불러올 수 없습니다",
