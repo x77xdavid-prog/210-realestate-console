@@ -875,7 +875,8 @@ def safe_photo_path(base: Path, rel: str) -> Path | None:
 
 
 def _photo_dir(config_path: Path) -> Path:
-    d = config_path.parent / "data" / "photos"
+    cfg = load_config(config_path)
+    d = cfg.database_path.parent / "photos"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

@@ -155,7 +155,7 @@ def run_once(config: AppConfig, snapshot: ListingSnapshot | None = None) -> RunR
     try:
         import time as _time
         from pathlib import Path as _Path
-        photo_dir = config.database_path.parent / "data" / "photos"
+        photo_dir = config.database_path.parent / "photos"
         _Path(photo_dir).mkdir(parents=True, exist_ok=True)
         enrich_candidates(
             snapshot.fetched,
