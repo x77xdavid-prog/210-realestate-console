@@ -647,6 +647,17 @@ class DashboardAuthTests(unittest.TestCase):
         self.assertIn("entries", response)
 
 
+class PhotoPathTests(unittest.TestCase):
+    def test_photo_path_rejects_traversal(self):
+        from realestate_alert.web_server import safe_photo_path
+        from pathlib import Path
+        base = Path("/data/photos")
+        self.assertIsNone(safe_photo_path(base, "../secret.txt"))
+        self.assertIsNone(safe_photo_path(base, "/etc/passwd"))
+        ok = safe_photo_path(base, "court_x-1/01.jpg")
+        self.assertTrue(str(ok).replace("\\", "/").endswith("court_x-1/01.jpg"))
+
+
 class DocumentApiTests(unittest.TestCase):
     def test_upload_list_download_and_ledger_cascade(self):
         with tempfile.TemporaryDirectory() as temp_dir:

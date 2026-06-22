@@ -237,6 +237,16 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 payload = build_detail_payload(_store(config_path), identity, cs_no, cort, seq,
                                                photo_dir=_photo_dir(config_path))
                 self._send_json(payload); return
+            if self.path.startswith("/api/photo"):
+                q = parse_qs(urlparse(self.path).query)
+                target = safe_photo_path(_photo_dir(config_path), (q.get("path") or [""])[0])
+                if not target or not target.exists():
+                    self.send_response(404); self.end_headers(); return
+                data = target.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers(); self.wfile.write(data); return
             if self.path == "/api/diagnostics":
                 self._send_json(_diagnostics_payload(config_path))
                 return
@@ -806,6 +816,17 @@ def build_detail_payload(store, identity, cs_no, cort_ofc_cd, gds_seq, photo_dir
     data = asdict(detail)
     store.upsert_detail(identity, data)
     return data
+
+
+def safe_photo_path(base: Path, rel: str) -> Path | None:
+    if not rel or rel.startswith("/") or ".." in rel.replace("\\", "/").split("/"):
+        return None
+    candidate = (base / rel).resolve()
+    try:
+        candidate.relative_to(base.resolve())
+    except ValueError:
+        return None
+    return candidate
 
 
 def _photo_dir(config_path: Path) -> Path:
