@@ -836,7 +836,7 @@ function renderFitBoard() {
 function renderDashboard() {
   renderScanProgress();
   renderMetrics();
-  renderSchedule();
+  renderSchedulePanel();
   renderMapSearch();
   renderNewBanner();
   renderBoard();
@@ -1249,52 +1249,210 @@ function saleDateLabel(saleDate) {
   return d ? `${d.getMonth() + 1}/${d.getDate()}` : "";
 }
 
-function renderSchedule() {
-  const all = [...state.listings, ...state.unmatched];
-  const byDate = new Map();
-  for (const listing of all) {
-    const sd = listing.sale_date;
-    const days = saleDays(sd);
-    if (days === null || days < 0) continue; // 지난 기일 제외
-    if (!byDate.has(sd)) byDate.set(sd, { total: 0, fit: 0 });
-    const entry = byDate.get(sd);
-    entry.total += 1;
-    if (fitLevel(listing) === "open" || fitLevel(listing) === "build") entry.fit += 1;
-  }
-  const dates = [...byDate.keys()].sort().slice(0, 21);
-  if (dates.length === 0) {
-    elements.schedulePanel.hidden = true;
-    return;
-  }
+/* ===== 월별 경매 캘린더 ===== */
+
+const COURT_NAMES = {
+  B000210: "서울중앙",
+  B000211: "서울동부",
+  B000215: "서울서부",
+  B000212: "서울남부",
+  B000213: "서울북부",
+};
+
+const calState = {
+  ym: null,       // "YYYYMM" currently displayed
+  data: null,     // cached API response for current ym
+  selDay: null,   // selected day number (1-31)
+  loading: false,
+};
+
+function currentYm() {
+  const now = new Date();
+  return String(now.getFullYear()) + String(now.getMonth() + 1).padStart(2, "0");
+}
+
+function renderSchedulePanel() {
+  // Always show the panel (calendar is the main content now)
   elements.schedulePanel.hidden = false;
-  elements.scheduleStrip.innerHTML = dates
-    .map((sd) => {
-      const entry = byDate.get(sd);
-      const days = saleDays(sd);
-      const d = parseSaleDate(sd);
-      const dow = days === 0 ? "오늘" : DOW_LABELS[d.getDay()];
-      const cls = (days === 0 ? " today" : "") + (state.dateFilter === sd ? " active" : "");
-      const fit = entry.fit ? `<span class="sched-fit">병원 ${entry.fit}</span>` : "";
-      return `<button type="button" class="sched-chip${cls}" data-date="${sd}">
-        <span class="sched-date">${saleDateLabel(sd)}</span>
-        <span class="sched-dow">${dow}</span>
-        <span class="sched-count">${entry.total}건</span>
-        ${fit}
-      </button>`;
-    })
-    .join("");
-  elements.scheduleStrip.querySelectorAll("[data-date]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.dateFilter = state.dateFilter === button.dataset.date ? null : button.dataset.date;
+  // Lazy: only fetch if we haven't loaded data for the current ym yet
+  const ym = calState.ym || currentYm();
+  if (calState.ym !== ym || calState.data === null) {
+    renderAuctionCalendar(ym);
+  } else {
+    buildCalendarHtml(calState.data, calState.selDay);
+  }
+}
+
+async function renderAuctionCalendar(ym) {
+  if (!ym) ym = currentYm();
+  calState.ym = ym;
+  calState.loading = true;
+
+  const container = document.getElementById("calendarContainer");
+  if (container) {
+    container.innerHTML = `<div class="cal-loading">불러오는 중…</div>`;
+  }
+
+  try {
+    const cal = await apiJson("/api/calendar?ym=" + ym);
+    calState.data = cal;
+
+    // Pick initial selected day: today if present in this month, else busiest day
+    const now = new Date();
+    const todayYm = String(now.getFullYear()) + String(now.getMonth() + 1).padStart(2, "0");
+    let sel = calState.selDay;
+    if (!sel) {
+      if (ym === todayYm && (cal.days || {})[String(now.getDate()).padStart(2, "0")] != null) {
+        sel = now.getDate();
+      } else {
+        // Find the busiest day
+        let maxCount = -1;
+        for (const [dd, count] of Object.entries(cal.days || {})) {
+          if (count > maxCount) { maxCount = count; sel = parseInt(dd, 10); }
+        }
+      }
+    }
+    calState.selDay = sel || 1;
+    buildCalendarHtml(cal, calState.selDay);
+  } catch (err) {
+    const container2 = document.getElementById("calendarContainer");
+    if (container2) {
+      container2.innerHTML = `<div class="cal-loading cal-error">캘린더 로드 실패: ${err.message}</div>`;
+    }
+  } finally {
+    calState.loading = false;
+  }
+}
+
+function buildCalendarHtml(cal, selDay) {
+  const container = document.getElementById("calendarContainer");
+  if (!container) return;
+
+  const ym = cal.ym || calState.ym || currentYm();
+  const year = parseInt(ym.slice(0, 4), 10);
+  const month = parseInt(ym.slice(4, 6), 10);
+  const now = new Date();
+  const todayYm = String(now.getFullYear()) + String(now.getMonth() + 1).padStart(2, "0");
+  const todayDay = ym === todayYm ? now.getDate() : -1;
+
+  // Build header row
+  const DOW_HD = ["일", "월", "화", "수", "목", "금", "토"];
+  let gridHtml = DOW_HD.map((d, i) =>
+    `<div class="cal-cah ${i === 0 ? "cal-sun" : i === 6 ? "cal-sat" : ""}">${d}</div>`
+  ).join("");
+
+  // Offset blank cells
+  const firstDow = new Date(year, month - 1, 1).getDay();
+  const daysInMonth = new Date(year, month, 0).getDate();
+  for (let i = 0; i < firstDow; i++) gridHtml += `<div></div>`;
+
+  // Day cells
+  for (let d = 1; d <= daysInMonth; d++) {
+    const wd = new Date(year, month - 1, d).getDay();
+    const dd = String(d).padStart(2, "0");
+    const count = cal.days ? cal.days[dd] : null;
+    const cls = ["cal-cell"];
+    if (count != null) cls.push("cal-has");
+    if (wd === 0) cls.push("cal-sun");
+    if (wd === 6) cls.push("cal-sat");
+    if (d === selDay) cls.push("cal-sel");
+    if (d === todayDay) cls.push("cal-today");
+    const clickAttr = count != null ? `data-calday="${d}"` : "";
+    gridHtml += `<div class="${cls.join(" ")}" ${clickAttr}>
+      <div class="cal-dn">${d}</div>${count != null ? `<div class="cal-cn">(${count.toLocaleString()})</div>` : ""}
+    </div>`;
+  }
+
+  // Side panel: courts for selected day
+  const selDD = String(selDay).padStart(2, "0");
+  const selYmd = ym + selDD;
+  const courtsForDay = (cal.courts_for && cal.courts_for[selYmd]) || {};
+  const totalForDay = (cal.days && cal.days[selDD]) || 0;
+
+  // Sort courts desc by count
+  const courtEntries = Object.entries(courtsForDay)
+    .map(([code, cnt]) => [COURT_NAMES[code] || code, cnt])
+    .sort((a, b) => b[1] - a[1]);
+
+  let courtHtml = `<div class="cal-crow cal-crow-all">
+    <span class="cal-cnm">법원전체</span><span class="cal-ccnt">(${totalForDay.toLocaleString()})</span>
+  </div>`;
+  for (const [name, cnt] of courtEntries) {
+    courtHtml += `<div class="cal-crow">
+      <span class="cal-cnm">${name}</span><span class="cal-ccnt">(${cnt.toLocaleString()})</span>
+    </div>`;
+  }
+
+  const selDateLabel = `${year}. ${String(month).padStart(2, "0")}. ${String(selDay).padStart(2, "0")}`;
+  const isToday = selDay === todayDay;
+
+  const prevYm = prevMonth(ym);
+  const nextYm = nextMonth(ym);
+
+  container.innerHTML = `
+    <div class="cal-wrap">
+      <div class="cal-main">
+        <div class="cal-hd">
+          <button type="button" class="cal-navbtn" data-calmove="${prevYm}">‹</button>
+          <b class="cal-ym-label">${year}. ${String(month).padStart(2, "0")}</b>
+          <button type="button" class="cal-navbtn" data-calmove="${nextYm}">›</button>
+        </div>
+        <div class="cal-grid">${gridHtml}</div>
+        <div class="cal-legend">
+          <span><i class="cal-lg-today"></i>오늘</span>
+          <span><b class="cal-lg-cnt">(0)</b> 진행건수</span>
+        </div>
+      </div>
+      <div class="cal-side">
+        <div class="cal-side-hd">
+          <b>${selDateLabel}</b>${isToday ? `<span class="cal-today-tag">오늘</span>` : ""}
+        </div>
+        <div class="cal-court-grid">${courtHtml}</div>
+      </div>
+    </div>
+  `;
+
+  // Wire day clicks
+  container.querySelectorAll("[data-calday]").forEach((cell) => {
+    cell.addEventListener("click", () => {
+      const d = parseInt(cell.dataset.calday, 10);
+      calState.selDay = d;
+      buildCalendarHtml(cal, d);
+
+      // Wire board date filter
+      const ymd = ym + String(d).padStart(2, "0");
+      state.dateFilter = state.dateFilter === ymd ? null : ymd;
       state.boardFilter = "fetched";
       state.fetchedPage = 1;
       document.querySelectorAll("[data-board-filter]").forEach((item) => {
         item.classList.toggle("active", item.dataset.boardFilter === "fetched");
       });
-      renderDashboard();
+      renderBoard();
       document.querySelector("#board").scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
+
+  // Wire month nav buttons
+  container.querySelectorAll("[data-calmove]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      calState.selDay = null;
+      renderAuctionCalendar(btn.dataset.calmove);
+    });
+  });
+}
+
+function prevMonth(ym) {
+  const y = parseInt(ym.slice(0, 4), 10);
+  const m = parseInt(ym.slice(4, 6), 10);
+  const d = new Date(y, m - 2, 1); // m-2 because months are 0-indexed
+  return String(d.getFullYear()) + String(d.getMonth() + 1).padStart(2, "0");
+}
+
+function nextMonth(ym) {
+  const y = parseInt(ym.slice(0, 4), 10);
+  const m = parseInt(ym.slice(4, 6), 10);
+  const d = new Date(y, m, 1); // m is already next month (0-indexed)
+  return String(d.getFullYear()) + String(d.getMonth() + 1).padStart(2, "0");
 }
 
 /* ===== 지도검색 (Kakao) ===== */
