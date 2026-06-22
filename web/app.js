@@ -1274,54 +1274,51 @@ function currentYm() {
 function renderSchedulePanel() {
   // Always show the panel (calendar is the main content now)
   elements.schedulePanel.hidden = false;
-  // Lazy: only fetch if we haven't loaded data for the current ym yet
+  // Always recompute from collected listings (instant, no fetch)
   const ym = calState.ym || currentYm();
-  if (calState.ym !== ym || calState.data === null) {
-    renderAuctionCalendar(ym);
-  } else {
-    buildCalendarHtml(calState.data, calState.selDay);
-  }
+  renderAuctionCalendar(ym);
 }
 
-async function renderAuctionCalendar(ym) {
+function renderAuctionCalendar(ym) {
   if (!ym) ym = currentYm();
   calState.ym = ym;
-  calState.loading = true;
 
-  const container = document.getElementById("calendarContainer");
-  if (container) {
-    container.innerHTML = `<div class="cal-loading">불러오는 중…</div>`;
+  // Build cal object from collected listings (no fetch needed)
+  const rows = [...state.listings, ...(state.unmatched || [])];
+  const days = {};
+  const hospDays = {};
+  for (const row of rows) {
+    const sd = String(row.sale_date || "");
+    if (sd.length !== 8) continue;
+    if (sd.slice(0, 6) !== ym) continue;
+    const dd = sd.slice(6, 8);
+    days[dd] = (days[dd] || 0) + 1;
+    const lvl = fitLevel(row);
+    if (lvl === "open" || lvl === "build") {
+      hospDays[dd] = (hospDays[dd] || 0) + 1;
+    }
   }
 
-  try {
-    const cal = await apiJson("/api/calendar?ym=" + ym);
-    calState.data = cal;
+  const cal = { ym, days, hospDays };
+  calState.data = cal;
 
-    // Pick initial selected day: today if present in this month, else busiest day
+  // Pick initial selected day: busiest, else today if present, else first with items
+  let sel = calState.selDay;
+  if (!sel) {
     const now = new Date();
     const todayYm = String(now.getFullYear()) + String(now.getMonth() + 1).padStart(2, "0");
-    let sel = calState.selDay;
-    if (!sel) {
-      if (ym === todayYm && (cal.days || {})[String(now.getDate()).padStart(2, "0")] != null) {
-        sel = now.getDate();
-      } else {
-        // Find the busiest day
-        let maxCount = -1;
-        for (const [dd, count] of Object.entries(cal.days || {})) {
-          if (count > maxCount) { maxCount = count; sel = parseInt(dd, 10); }
-        }
+    if (ym === todayYm && days[String(now.getDate()).padStart(2, "0")] != null) {
+      sel = now.getDate();
+    } else {
+      // Find busiest day
+      let maxCount = -1;
+      for (const [dd, count] of Object.entries(days)) {
+        if (count > maxCount) { maxCount = count; sel = parseInt(dd, 10); }
       }
     }
-    calState.selDay = sel || 1;
-    buildCalendarHtml(cal, calState.selDay);
-  } catch (err) {
-    const container2 = document.getElementById("calendarContainer");
-    if (container2) {
-      container2.innerHTML = `<div class="cal-loading cal-error">캘린더 로드 실패: ${err.message}</div>`;
-    }
-  } finally {
-    calState.loading = false;
   }
+  calState.selDay = sel || 1;
+  buildCalendarHtml(cal, calState.selDay);
 }
 
 function buildCalendarHtml(cal, selDay) {
@@ -1363,23 +1360,31 @@ function buildCalendarHtml(cal, selDay) {
     </div>`;
   }
 
-  // Side panel: courts for selected day
+  // Side panel: listings for selected day from collected rows
   const selDD = String(selDay).padStart(2, "0");
   const selYmd = ym + selDD;
-  const courtsForDay = (cal.courts_for && cal.courts_for[selYmd]) || {};
   const totalForDay = (cal.days && cal.days[selDD]) || 0;
+  const hospForDay = (cal.hospDays && cal.hospDays[selDD]) || 0;
 
-  // Sort courts desc by count
-  const courtEntries = Object.entries(courtsForDay)
-    .map(([code, cnt]) => [COURT_NAMES[code] || code, cnt])
-    .sort((a, b) => b[1] - a[1]);
+  const rows = [...state.listings, ...(state.unmatched || [])];
+  const dayListings = rows.filter((r) => String(r.sale_date || "") === selYmd);
 
   let courtHtml = `<div class="cal-crow cal-crow-all">
-    <span class="cal-cnm">법원전체</span><span class="cal-ccnt">(${totalForDay.toLocaleString()})</span>
+    <span class="cal-cnm">전체 ${totalForDay.toLocaleString()}건</span>
+    ${hospForDay ? `<span class="cal-ccnt sched-fit">병원 후보 ${hospForDay}</span>` : ""}
   </div>`;
-  for (const [name, cnt] of courtEntries) {
-    courtHtml += `<div class="cal-crow">
-      <span class="cal-cnm">${name}</span><span class="cal-ccnt">(${cnt.toLocaleString()})</span>
+  for (const item of dayListings) {
+    const lvl = fitLevel(item);
+    const isHosp = lvl === "open" || lvl === "build";
+    const minBid = item.min_bid_price != null ? `최저 ${cdtWon(item.min_bid_price)}` : "";
+    const appraisal = item.appraisal_price != null ? `감정 ${cdtWon(item.appraisal_price)}` : "";
+    const priceHtml = [minBid, appraisal].filter(Boolean).join(" / ");
+    const clickable = item.detail_link
+      ? `style="cursor:pointer" data-cal-detail="${escapeHtml(item.detail_link)}"`
+      : "";
+    courtHtml += `<div class="cal-crow${isHosp ? " cal-crow-hosp" : ""}" ${clickable}>
+      <span class="cal-cnm">${escapeHtml(item.title || item.location || "-")}</span>
+      ${priceHtml ? `<span class="cal-ccnt">${priceHtml}</span>` : ""}
     </div>`;
   }
 
@@ -1437,6 +1442,13 @@ function buildCalendarHtml(cal, selDay) {
     btn.addEventListener("click", () => {
       calState.selDay = null;
       renderAuctionCalendar(btn.dataset.calmove);
+    });
+  });
+
+  // Wire side-panel listing clicks → open detail modal
+  container.querySelectorAll("[data-cal-detail]").forEach((row) => {
+    row.addEventListener("click", () => {
+      openCourtDetail(row.dataset.calDetail);
     });
   });
 }
