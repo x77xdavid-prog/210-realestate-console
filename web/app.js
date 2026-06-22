@@ -274,6 +274,23 @@ function safeHref(url) {
   }
 }
 
+// 매물 출처 사이트 바로가기 정보. LH·네이버·원본은 해당 매물 페이지로 직접 이동,
+// 온비드·법원경매는 사이트가 GET 딥링크를 막아 포털로 이동(물건/사건 번호로 검색).
+const SOURCE_PORTAL_ONLY = { onbid: "물건관리번호", court: "사건번호" };
+function sourceLinkInfo(listing) {
+  const raw = (listing.url || "").trim();
+  if (!raw) return null;
+  const href = safeHref(raw);
+  if (href === "#") return null;
+  const label = { onbid: "온비드", court: "법원경매", lh: "LH 청약", naver: "네이버 매물" }[listing.source]
+    || "원본 매물";
+  const portalField = SOURCE_PORTAL_ONLY[listing.source];
+  const title = portalField
+    ? `${label} 포털 열기 — ${portalField} ${listing.external_id ?? ""} 로 검색하세요`
+    : `${label} 페이지 바로 열기`;
+  return { href, label: `${label} ↗`, title };
+}
+
 function naverMapSearchUrl(address) {
   return `https://map.naver.com/p/search/${encodeURIComponent(address)}`;
 }
@@ -1037,7 +1054,13 @@ function listingCardHtml(listing) {
         <span class="status-pill ${registry.className}">${escapeHtml(registry.label)}</span>
       </div>
       <div class="card-actions">
-        <a class="button primary compact" href="${escapeHtml(naverLandUrl(listing))}" target="_blank" rel="noreferrer">네이버 부동산</a>
+        ${(() => {
+          const src = sourceLinkInfo(listing);
+          return src
+            ? `<a class="button primary compact" href="${escapeHtml(src.href)}" target="_blank" rel="noreferrer" title="${escapeHtml(src.title)}">${escapeHtml(src.label)}</a>`
+            : "";
+        })()}
+        <a class="button secondary compact" href="${escapeHtml(naverLandUrl(listing))}" target="_blank" rel="noreferrer">네이버</a>
         <button type="button" class="button secondary compact" data-action="map" data-identity="${escapeHtml(identity)}">지도/토지</button>
         <button type="button" class="button secondary compact" data-action="ledger" data-identity="${escapeHtml(identity)}">
           ${inLedger ? "매물장 ✓" : "매물장 추가"}
@@ -1284,26 +1307,22 @@ function loadKakaoSdk(key) {
   return kakaoLoadPromise;
 }
 
-function mapPlaceholderHtml(pinCount) {
-  return `
-    <div class="map-placeholder-card">
-      <strong><i class="ti" aria-hidden="true"></i>지도를 켜려면 Kakao 지도 키가 필요합니다 (무료)</strong>
-      <ol>
-        <li>developers.kakao.com → 애플리케이션 추가 → <b>JavaScript 키</b> 복사</li>
-        <li>플랫폼 → Web → 사이트 도메인에 <code>https://210.mapsaihelp.com</code> 등록</li>
-        <li>Render 환경변수 <code>KAKAO_JS_KEY</code> 에 키 입력 → 저장(자동 재배포)</li>
-      </ol>
-      <p>키를 넣으면 이 자리에 조건 일치 매물 <b>${pinCount}건</b>이 병원 적합도 색으로 표시됩니다.</p>
-    </div>`;
+function pinSvg(color) {
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="34" viewBox="0 0 26 34">` +
+    `<path d="M13 0C6 0 .5 5.5.5 12.4.5 21.6 13 34 13 34s12.5-12.4 12.5-21.6C25.5 5.5 20 0 13 0z" fill="${color}"/>` +
+    `<circle cx="13" cy="12.5" r="5" fill="#fff"/></svg>`
+  );
+}
+
+function fitColorFor(listing) {
+  const level = (listing.hospital_fit && listing.hospital_fit.level) || "check";
+  return FIT_MARKER_COLOR[level] || FIT_MARKER_COLOR.check;
 }
 
 function mapPinImage(color) {
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="34">` +
-    `<path d="M13 0C6 0 .5 5.5.5 12.4.5 21.6 13 34 13 34s12.5-12.4 12.5-21.6C25.5 5.5 20 0 13 0z" fill="${color}"/>` +
-    `<circle cx="13" cy="12.5" r="5" fill="#fff"/></svg>`;
   return new kakao.maps.MarkerImage(
-    "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg),
+    "data:image/svg+xml;charset=utf-8," + encodeURIComponent(pinSvg(color)),
     new kakao.maps.Size(26, 34),
     { offset: new kakao.maps.Point(13, 34) },
   );
@@ -1321,22 +1340,74 @@ function mapInfoHtml(listing) {
 
 function renderMapSearch() {
   const pins = state.listings.filter((item) => item.latitude && item.longitude);
-  if (!state.kakaoKey) {
-    elements.kakaoMap.hidden = true;
-    elements.mapSearchPlaceholder.hidden = false;
-    elements.mapSearchPlaceholder.innerHTML = mapPlaceholderHtml(pins.length);
-    return;
-  }
   elements.mapSearchPlaceholder.hidden = true;
   elements.kakaoMap.hidden = false;
-  loadKakaoSdk(state.kakaoKey)
-    .then(() => buildKakaoMap(pins))
-    .catch(() => {
-      elements.kakaoMap.hidden = true;
-      elements.mapSearchPlaceholder.hidden = false;
-      elements.mapSearchPlaceholder.innerHTML =
-        '<div class="map-placeholder-card">지도를 불러오지 못했습니다. Kakao 키와 도메인 등록을 확인하세요.</div>';
+  // Kakao 키가 있으면 카카오(한국형 지도·로드뷰)로, 없으면 키가 필요 없는
+  // OpenStreetMap(Leaflet)으로 — 어느 쪽이든 키 없이도 지도는 항상 보인다.
+  const provider = state.kakaoKey
+    ? loadKakaoSdk(state.kakaoKey).then(() => buildKakaoMap(pins))
+    : loadLeaflet().then(() => buildLeafletMap(pins));
+  provider.catch(() => {
+    elements.kakaoMap.hidden = true;
+    elements.mapSearchPlaceholder.hidden = false;
+    elements.mapSearchPlaceholder.innerHTML =
+      '<div class="map-placeholder-card">지도를 불러오지 못했습니다. 인터넷 연결을 확인하세요.</div>';
+  });
+}
+
+/* ===== OpenStreetMap 폴백 (Leaflet — 키 불필요) ===== */
+
+let leafletLoadPromise = null;
+let leafletMapObj = null;
+let leafletMarkers = [];
+
+function loadLeaflet() {
+  if (window.L) return Promise.resolve();
+  if (leafletLoadPromise) return leafletLoadPromise;
+  leafletLoadPromise = new Promise((resolve, reject) => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet";
+    css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    document.head.appendChild(css);
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+  return leafletLoadPromise;
+}
+
+function buildLeafletMap(pins) {
+  if (!window.L) return;
+  if (!leafletMapObj) {
+    const center = pins.length ? [pins[0].latitude, pins[0].longitude] : [37.4787, 126.9516]; // 관악·신림 부근
+    leafletMapObj = L.map(elements.kakaoMap, { scrollWheelZoom: true }).setView(center, 12);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(leafletMapObj);
+  }
+  leafletMarkers.forEach((marker) => marker.remove());
+  leafletMarkers = [];
+  const latlngs = [];
+  pins.forEach((listing) => {
+    const icon = L.divIcon({
+      html: pinSvg(fitColorFor(listing)),
+      className: "leaflet-fit-pin",
+      iconSize: [26, 34],
+      iconAnchor: [13, 34],
+      popupAnchor: [0, -30],
     });
+    const marker = L.marker([listing.latitude, listing.longitude], { icon, title: listing.title })
+      .addTo(leafletMapObj)
+      .bindPopup(mapInfoHtml(listing));
+    leafletMarkers.push(marker);
+    latlngs.push([listing.latitude, listing.longitude]);
+  });
+  if (latlngs.length) leafletMapObj.fitBounds(latlngs, { padding: [40, 40], maxZoom: 15 });
+  // 패널이 숨겨진 상태에서 생성됐을 수 있으므로 크기를 다시 계산한다.
+  setTimeout(() => leafletMapObj && leafletMapObj.invalidateSize(), 60);
 }
 
 function buildKakaoMap(pins) {
@@ -1997,6 +2068,48 @@ async function openChecklistModal(identity) {
   elements.checklistModal.showModal();
 }
 
+function openManualVerifyPage() {
+  const identity = state.checklist.currentIdentity;
+  if (!identity) return;
+  if (!state.hasServer) {
+    showToast("수동 검증 입력은 serve-web 실행 시에만 동작합니다");
+    return;
+  }
+  const entry = state.ledger.get(identity);
+  const listing = entry?.listing || {};
+  const profile = elements.checklistProfile.value;
+  try {
+    localStorage.setItem(
+      "rea210:verifyTarget",
+      JSON.stringify({ identity, listing, profile }),
+    );
+  } catch {
+    // 저장 실패해도 식별자만으로 페이지는 동작한다
+  }
+  window.open(`verify.html?identity=${encodeURIComponent(identity)}`, "_blank");
+}
+
+function openReportPage() {
+  const identity = state.checklist.currentIdentity;
+  if (!identity) return;
+  if (!state.hasServer) {
+    showToast("리포트 생성은 serve-web 실행 시에만 동작합니다");
+    return;
+  }
+  const entry = state.ledger.get(identity);
+  const listing = entry?.listing || {};
+  const profile = elements.checklistProfile.value;
+  try {
+    localStorage.setItem(
+      "rea210:reportTarget",
+      JSON.stringify({ identity, listing, profile }),
+    );
+  } catch {
+    // 저장 실패해도 식별자만으로 페이지는 동작한다
+  }
+  window.open(`report.html?identity=${encodeURIComponent(identity)}`, "_blank");
+}
+
 function setChecklistView(view) {
   state.checklist.view = view;
   document.querySelector("#viewReportTab").classList.toggle("active", view === "report");
@@ -2193,11 +2306,12 @@ function renderChecklistReport() {
 
   const evidenceHtml = evidenceItems.map((item) => {
     const [label, tone] = item.kind === "info" ? AUTO_STATUS_PILLS.info : itemStatusPill(item);
+    const manualBadge = item.source === "manual" ? `<span class="src-badge">제공 자료</span>` : "";
     return `
-      <div class="evidence-card">
+      <div class="evidence-card${item.source === "manual" ? " evidence-manual" : ""}">
         <div class="evidence-head">
           <strong>${escapeHtml(item.label)}</strong>
-          <span class="status-pill ${tone}">${label}</span>
+          <span class="evidence-pills">${manualBadge}<span class="status-pill ${tone}">${label}</span></span>
         </div>
         <p>${escapeHtml(item.evidence)}</p>
       </div>
@@ -2757,6 +2871,13 @@ function renderMapInfo(listing) {
     ["건폐율/용적률", escapeHtml(`${listing.building_coverage_ratio ?? "-"}% / ${listing.floor_area_ratio ?? "-"}%`)],
     ["신축/매입 메모", escapeHtml(listing.buildable_note || "-")],
     ["현재 비용 정보", listing.monthly_rent > 0 ? `${money(listing.deposit)} / ${money(listing.monthly_rent)}` : "매입가 직접 입력 필요"],
+    ["출처 바로가기", (() => {
+      const src = sourceLinkInfo(listing);
+      if (!src) return "-";
+      const field = SOURCE_PORTAL_ONLY[listing.source];
+      const note = field ? ` (포털 — ${field} ${escapeHtml(listing.external_id ?? "")} 검색)` : "";
+      return `<a href="${escapeHtml(src.href)}" target="_blank" rel="noreferrer">${escapeHtml(src.label)}</a>${note}`;
+    })()],
     ["네이버 확인", `<a href="${escapeHtml(naverLandUrl(listing))}" target="_blank" rel="noreferrer">네이버 부동산에서 시세·매물 보기</a>`],
   ]
     .map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`)
@@ -3163,6 +3284,12 @@ document.querySelector("#checklistModalClose").addEventListener("click", () => {
 document.querySelector("#checklistEvaluateButton").addEventListener("click", () => {
   void runChecklistEvaluate();
 });
+document.querySelector("#manualVerifyButton").addEventListener("click", () => {
+  openManualVerifyPage();
+});
+document.querySelector("#generateReportButton").addEventListener("click", () => {
+  openReportPage();
+});
 elements.checklistProfile.addEventListener("change", () => {
   void switchChecklistProfile();
 });
@@ -3222,15 +3349,25 @@ document.querySelector("#copyAddressButton").addEventListener("click", async () 
   showToast("주소를 복사했습니다");
 });
 document.querySelector("#useFinanceButton").addEventListener("click", () => {
-  if (!state.selectedListing) {
+  const listing = state.selectedListing;
+  if (!listing) {
     return;
   }
-  const basePrice = state.selectedListing.monthly_rent > 0
-    ? Math.max(500000000, state.selectedListing.deposit * 8)
-    : 1000000000;
-  document.querySelector("#purchasePrice").value = String(basePrice);
+  // 매물 실제 가격을 매입가로 반영한다.
+  // 매매·공매·경매: 매매가(보증금) → 감정가 → 최저입찰가 순으로 사용.
+  // 임대(월세>0): 매매가가 없어 보증금×8로 근사(추정).
+  const basePrice = (listing.monthly_rent ?? 0) > 0
+    ? Math.max(500000000, (listing.deposit || 0) * 8)
+    : (listing.deposit || listing.appraisal_price || listing.min_bid_price || 1000000000);
+  const input = document.querySelector("#purchasePrice");
+  input.value = String(basePrice);
+  formatMoneyInput(input); // 쉼표 + 억/만원 힌트 갱신
   calculateEstimate();
   document.querySelector("#finance").scrollIntoView({ behavior: "smooth", block: "start" });
+  const basis = (listing.monthly_rent ?? 0) > 0
+    ? "보증금 기준 추정"
+    : listing.deposit ? "매매가" : listing.appraisal_price ? "감정가" : listing.min_bid_price ? "최저입찰가" : "기본값";
+  showToast(`매입가 ${koreanMoneyLabel(basePrice)} 반영 (${basis})`);
 });
 /* ===== Boot ===== */
 

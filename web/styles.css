@@ -1115,6 +1115,18 @@ td span {
   overflow: hidden;
 }
 
+/* Leaflet(OSM) 폴백 — divIcon 기본 흰 박스 제거, 타일 위 컨트롤 톤 정리 */
+.leaflet-fit-pin {
+  background: none;
+  border: none;
+}
+.kakao-map .leaflet-container {
+  height: 100%;
+  width: 100%;
+  font: inherit;
+  background: #e8eef2;
+}
+
 .map-placeholder-card {
   background: var(--surface-strong);
   border: 1px dashed var(--line-strong);
@@ -2811,5 +2823,287 @@ details.fit-group[open] > summary::before {
   .reveal {
     opacity: 1;
     transform: none;
+  }
+}
+
+/* ===== 제공 자료(수동 입력) 배지 ===== */
+.src-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #7a4f0a;
+  background: #fdf1d8;
+  border: 1px solid #f2d79a;
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.evidence-pills {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.evidence-card.evidence-manual {
+  border-color: #f2d79a;
+  background: linear-gradient(180deg, #fffdf7 0%, #ffffff 70%);
+}
+
+/* ===== 수동 검증 입력 페이지 (verify.html) ===== */
+.verify-body {
+  padding: 0;
+}
+.verify-shell {
+  max-width: 940px;
+  margin: 0 auto;
+  padding: clamp(20px, 3vw, 44px) clamp(16px, 4vw, 32px) 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.verify-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.verify-back {
+  align-self: flex-start;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--teal);
+  text-decoration: none;
+  padding: 6px 0;
+}
+.verify-back:hover {
+  text-decoration: underline;
+}
+.verify-head h1 {
+  margin: 0;
+  font-size: var(--text-hero);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.verify-subtitle {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.verify-lead {
+  margin: 4px 0 0;
+  font-size: 0.86rem;
+  line-height: 1.65;
+  color: var(--ink-soft);
+  max-width: 760px;
+}
+.verify-lead .src-badge {
+  vertical-align: middle;
+}
+.verify-alert {
+  padding: 16px 18px;
+  border-radius: var(--radius-md);
+  background: var(--rose-soft);
+  border: 1px solid #f6c2cf;
+  color: #8d1430;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+.verify-card {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: clamp(18px, 2.4vw, 26px);
+  box-shadow: var(--shadow-float);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.verify-card-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.verify-step-note {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--ink-faint);
+}
+.verify-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+.facts-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.field input,
+.field select {
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.field input:focus,
+.field select:focus {
+  outline: none;
+  border-color: var(--teal-bright);
+  box-shadow: 0 0 0 3px rgba(14, 165, 183, 0.16);
+}
+.verify-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.verify-note {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.verify-notice {
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: #fff6e6;
+  border: 1px solid #f3d79a;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: #6b4a12;
+}
+.verify-notice strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #8a5a10;
+}
+.verify-notice p {
+  margin: 4px 0 0;
+}
+.verify-notice a {
+  color: var(--teal);
+  font-weight: 700;
+}
+.verify-notice code {
+  background: rgba(13, 36, 54, 0.06);
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+}
+.override-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.override-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: #fff;
+}
+.override-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.override-title strong {
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+.override-cat {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: var(--teal);
+  background: var(--teal-soft);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.override-desc {
+  margin: 6px 0 0;
+  font-size: 0.76rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+.override-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.override-status {
+  font: inherit;
+  font-weight: 700;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  align-self: flex-start;
+  min-width: 110px;
+}
+.override-evidence {
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--ink);
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  resize: vertical;
+}
+.override-status:focus,
+.override-evidence:focus {
+  outline: none;
+  border-color: var(--teal-bright);
+  box-shadow: 0 0 0 3px rgba(14, 165, 183, 0.16);
+}
+.verify-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  position: sticky;
+  bottom: 0;
+  padding: 14px 0 4px;
+  background: linear-gradient(180deg, rgba(245, 248, 250, 0) 0%, #f5f8fa 40%);
+}
+.button.verify-save {
+  font-size: 0.92rem;
+  padding: 12px 24px;
+}
+@media (max-width: 720px) {
+  .facts-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .override-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+}
+@media (max-width: 460px) {
+  .facts-grid {
+    grid-template-columns: 1fr;
   }
 }

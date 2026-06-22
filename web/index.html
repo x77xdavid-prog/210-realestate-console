@@ -288,7 +288,7 @@
               <span class="lg check">확인 필요</span>
             </div>
           </div>
-          <p class="embed-note">조건 일치 매물을 지도에 병원 적합도 색으로 표시합니다. 핀을 누르면 상세가 뜹니다. (지도가 안 보이면 Kakao 지도 키 설정이 필요합니다 — 아래 안내)</p>
+          <p class="embed-note">조건 일치 매물을 지도에 병원 적합도 색으로 표시합니다. 핀을 누르면 상세가 뜹니다. (키 없이 OpenStreetMap으로 표시되며, Kakao 키 <code>KAKAO_JS_KEY</code>를 넣으면 한국형 지도·로드뷰로 자동 전환됩니다.)</p>
           <div id="kakaoMap" class="kakao-map" hidden></div>
           <div id="mapSearchPlaceholder" class="map-placeholder"></div>
         </section>
@@ -538,6 +538,12 @@
             </label>
             <button type="button" class="button primary compact" id="checklistEvaluateButton">
               자동 검증 실행
+            </button>
+            <button type="button" class="button secondary compact" id="manualVerifyButton">
+              📝 미확인 직접 채우기
+            </button>
+            <button type="button" class="button secondary compact" id="generateReportButton">
+              📄 리포트 생성
             </button>
           </div>
         </div>
