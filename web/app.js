@@ -1100,6 +1100,69 @@ function renderBoard() {
       handleCardAction("map", listing);
     });
   });
+  observeCardThumbs();
+}
+
+/* ===== 카드 썸네일 lazy 로딩 — 화면에 보이는 court 카드의 사진을 즉시 불러온다 ===== */
+const thumbAttempted = new Set();
+const thumbQueue = [];
+let thumbActive = 0;
+const THUMB_MAX_CONCURRENT = 3;
+
+function observeCardThumbs() {
+  if (!("IntersectionObserver" in window)) return;
+  const obs = new IntersectionObserver((entries, o) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      o.unobserve(e.target);
+      thumbQueue.push(e.target);
+      pumpThumbs();
+    }
+  }, { rootMargin: "300px" });
+  elements.boardGrid.querySelectorAll(".listing-card").forEach((card) => {
+    // 사진이 아직 없는(placeholder) 카드만 관찰
+    if (card.querySelector(".card-thumb .thumb-ph")) obs.observe(card);
+  });
+}
+
+function pumpThumbs() {
+  while (thumbActive < THUMB_MAX_CONCURRENT && thumbQueue.length) {
+    const card = thumbQueue.shift();
+    thumbActive += 1;
+    loadCardThumb(card).finally(() => {
+      thumbActive -= 1;
+      pumpThumbs();
+    });
+  }
+}
+
+async function loadCardThumb(card) {
+  const id = card.dataset.cardIdentity;
+  if (!id || thumbAttempted.has(id)) return;
+  const listing = [...state.listings, ...state.unmatched, ...state.recommend].find(
+    (item) => identityOf(item) === id,
+  );
+  if (!listing || listing.thumbnail_url || !listing.detail_link) return;
+  thumbAttempted.add(id);
+  const dl = listing.detail_link;
+  try {
+    const detail = await apiJson(
+      `/api/listing/detail?id=${encodeURIComponent(dl.id)}&cs=${encodeURIComponent(dl.cs)}` +
+      `&court=${encodeURIComponent(dl.court)}&seq=${encodeURIComponent(dl.seq)}`,
+    );
+    const photos = (detail && detail.photos) || [];
+    if (!photos.length) return;
+    const url = `/api/photo?path=${encodeURIComponent(photos[0].file)}`;
+    listing.thumbnail_url = url;
+    listing.photo_count = photos.length;
+    const thumb = card.querySelector(".card-thumb");
+    if (thumb) {
+      const badge = photos.length > 1 ? `<span class="thumb-count">📷 ${photos.length}</span>` : "";
+      thumb.innerHTML = `<img src="${url}" alt="매물 사진" loading="lazy">${badge}`;
+    }
+  } catch {
+    /* 사진 불러오기 실패는 조용히 무시 — placeholder 유지 */
+  }
 }
 
 function listingCardHtml(listing) {
