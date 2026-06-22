@@ -11,9 +11,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
+from realestate_alert.address import extract_dong
 from realestate_alert.checklist import (
+    AUTO_STATUSES,
     ITEM_IDS,
     MANUAL_STATUSES,
+    OVERRIDABLE_ITEM_IDS,
     PROFILES,
     compute_review,
     definition_payload,
@@ -319,7 +322,12 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                     # 프로필 전환 미리보기: 저장 없이 다른 프로필로 계산만 한다
                     override = (query.get("profile") or [""])[0].strip()
                     profile = override if override in PROFILES else stored["profile"]
-                    review = compute_review(profile, stored.get("auto"), stored.get("manual"))
+                    review = compute_review(
+                        profile,
+                        stored.get("auto"),
+                        stored.get("manual"),
+                        stored.get("auto_override"),
+                    )
                 self._send_json({"identity": identity, "review": review})
                 return
             if self.path == "/":
@@ -470,13 +478,16 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                     "profile": profile,
                     "auto": auto,
                     "manual": stored.get("manual", {}),
+                    "auto_override": stored.get("auto_override", {}),
                     "evaluated_at": _utc_now_iso(),
                 }
                 store.save_checklist_review(identity, review)
                 self._send_json(
                     {
                         "identity": identity,
-                        "review": compute_review(profile, auto, review["manual"]),
+                        "review": compute_review(
+                            profile, auto, review["manual"], review["auto_override"]
+                        ),
                         "errors": report.get("errors", {}),
                         "evaluated_at": review["evaluated_at"],
                     }
@@ -518,7 +529,7 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                         "identity": identity,
                         "updated": len(item_ids),
                         "review": compute_review(
-                            stored["profile"], stored.get("auto"), manual
+                            stored["profile"], stored.get("auto"), manual, stored.get("auto_override")
                         ),
                     }
                 )
@@ -555,10 +566,19 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                     {
                         "identity": identity,
                         "review": compute_review(
-                            stored["profile"], stored.get("auto"), manual
+                            stored["profile"], stored.get("auto"), manual, stored.get("auto_override")
                         ),
                     }
                 )
+                return
+            if self.path == "/api/checklist/auto-override":
+                self._handle_auto_override(config_path)
+                return
+            if self.path == "/api/checklist/suggest":
+                self._handle_checklist_suggest()
+                return
+            if self.path == "/api/report":
+                self._handle_report(config_path)
                 return
             self.send_error(404, "Not found")
 
@@ -569,6 +589,138 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
 
         def log_message(self, format: str, *args) -> None:
             return
+
+        def _handle_auto_override(self, config_path: Path) -> None:
+            """공공 API가 못 채운 auto·info 항목을 제공 자료 근거로 수동 입력(저장)한다.
+
+            body: {identity, profile?, overrides:[{item_id, status, evidence}]}
+            status가 빈 문자열이면 해당 항목의 수동 입력을 제거(자동값으로 복귀)한다.
+            """
+            body = self._read_json_body()
+            identity = str(body.get("identity", "")).strip()
+            overrides = body.get("overrides")
+            if not identity or not isinstance(overrides, list):
+                self._send_json({"error": "identity와 overrides(목록)가 필요합니다."}, status=400)
+                return
+            cleaned: list[tuple[str, str, str]] = []
+            for entry in overrides:
+                if not isinstance(entry, dict):
+                    self._send_json({"error": "각 override는 객체여야 합니다."}, status=400)
+                    return
+                item_id = str(entry.get("item_id", "")).strip()
+                status = str(entry.get("status", "")).strip()
+                evidence = str(entry.get("evidence", ""))
+                if item_id not in OVERRIDABLE_ITEM_IDS:
+                    self._send_json(
+                        {"error": f"수동 입력할 수 없는 항목입니다: {item_id}"}, status=400
+                    )
+                    return
+                if status and status not in AUTO_STATUSES:
+                    self._send_json({"error": f"지원하지 않는 상태: {status}"}, status=400)
+                    return
+                cleaned.append((item_id, status, evidence))
+
+            store = _store(config_path)
+            stored = store.get_checklist_review(identity) or {
+                "profile": "building",
+                "auto": {},
+                "manual": {},
+                "auto_override": {},
+            }
+            requested_profile = body.get("profile")
+            if isinstance(requested_profile, str) and requested_profile in PROFILES:
+                stored["profile"] = requested_profile
+            auto_override = dict(stored.get("auto_override", {}))
+            for item_id, status, evidence in cleaned:
+                if not status:
+                    auto_override.pop(item_id, None)  # 빈 상태 = 수동 입력 해제
+                else:
+                    auto_override[item_id] = {
+                        "status": status,
+                        "evidence": evidence,
+                        "source": "manual",
+                        "updated_at": _utc_now_iso(),
+                    }
+            stored["auto_override"] = auto_override
+            store.save_checklist_review(identity, stored)
+            self._send_json(
+                {
+                    "identity": identity,
+                    "updated": len(cleaned),
+                    "review": compute_review(
+                        stored["profile"],
+                        stored.get("auto"),
+                        stored.get("manual"),
+                        auto_override,
+                    ),
+                }
+            )
+
+        def _handle_checklist_suggest(self) -> None:
+            """물건 정보(facts)를 매물에 합쳐 자동 판정을 미리 계산한다 (저장 없음).
+
+            수동 입력 페이지에서 '물건 정보로 자동 작성'에 쓴다. 주소가 있으면
+            공공 데이터(건축물대장·토지·실거래·심평원 의원/약국)도 시도하고,
+            실패한 소스는 errors로 돌려준다.
+            body: {listing, profile?, facts?}
+            """
+            body = self._read_json_body()
+            listing = body.get("listing")
+            facts = body.get("facts")
+            if not isinstance(listing, dict):
+                listing = {}
+            merged = dict(listing)
+            if isinstance(facts, dict):
+                # 입력된 값만 덮어쓴다 (None·빈 문자열은 무시)
+                for key, value in facts.items():
+                    if value is not None and value != "":
+                        merged[key] = value
+            address = str(merged.get("location", "")).strip()
+            if address:
+                report = verify_address(address)
+                _attach_medical_data(report)
+            else:
+                report = {"errors": {}}
+            auto = evaluate_auto_items(merged, report)
+            self._send_json({"auto": auto, "errors": report.get("errors", {})})
+
+        def _handle_report(self, config_path: Path) -> None:
+            """매물 하나의 리포트 생성용 종합 데이터 — 공공데이터(건축물대장·토지·실거래·심평원)
+            + 체크리스트 판정을 한 번에 돌려준다 (저장 없음). report.html이 이 값으로 렌더한다.
+
+            body: {identity, listing, profile?}
+            """
+            body = self._read_json_body()
+            identity = str(body.get("identity", "")).strip()
+            listing = body.get("listing")
+            profile = str(body.get("profile", "building"))
+            if not isinstance(listing, dict):
+                listing = {}
+            if profile not in PROFILES:
+                profile = "building"
+            address = str(listing.get("location", "")).strip()
+            if address:
+                report = verify_address(address)
+                _attach_medical_data(report)
+            else:
+                report = {"errors": {}}
+            auto = evaluate_auto_items(listing, report)
+            stored = _store(config_path).get_checklist_review(identity) or {}
+            review = compute_review(profile, auto, stored.get("manual"), stored.get("auto_override"))
+            self._send_json(
+                {
+                    "listing": listing,
+                    "profile": profile,
+                    "parcel": report.get("parcel"),
+                    "building": report.get("building"),
+                    "land": report.get("land"),
+                    "market": report.get("market"),
+                    "medical": report.get("medical"),
+                    "review": review,
+                    "errors": report.get("errors", {}),
+                    "generated_at": _utc_now_iso()[:10],
+                }
+            )
 
         def _authorized(self) -> bool:
             password = os.environ.get(DASHBOARD_PASSWORD_ENV, "").strip()
@@ -644,6 +796,10 @@ def _attach_medical_data(report: dict[str, Any]) -> None:
     parcel = report.get("parcel") or {}
     dong = str(parcel.get("dong") or "").strip()
     if not dong:
+        # 법정동코드 미등록 지역은 parcel 파싱이 실패하지만, 심평원 조회는 동 이름만
+        # 있으면 되므로 주소 문자열에서 동을 직접 추출해 시도한다.
+        dong = extract_dong(str(report.get("address") or "")) or ""
+    if not dong:
         return
     try:
         report["medical"] = medical_to_dict(fetch_medical_nearby(dong))
@@ -656,7 +812,10 @@ def _review_summaries(config_path: Path) -> dict[str, Any]:
     summaries: dict[str, Any] = {}
     for identity, stored in _store(config_path).all_checklist_reviews().items():
         computed = compute_review(
-            stored.get("profile", "building"), stored.get("auto"), stored.get("manual")
+            stored.get("profile", "building"),
+            stored.get("auto"),
+            stored.get("manual"),
+            stored.get("auto_override"),
         )
         summaries[identity] = {
             "profile": computed["profile"],

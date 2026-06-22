@@ -383,6 +383,174 @@ class ChecklistApiTests(unittest.TestCase):
         self.assertEqual(bulk["updated"], 3)
         self.assertEqual(reset["review"]["progress"]["manual_done"], 2)
 
+    def test_auto_override_fills_card_and_survives_reevaluation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            clean_env = {k: v for k, v in os.environ.items()
+                         if k not in ("DATA_GO_KR_API_KEY", "VWORLD_API_KEY")}
+            try:
+                with mock.patch.dict("os.environ", clean_env, clear=True):
+                    # 키 없이 평가 → 용도지역 미확인
+                    evaluated = _request_json(
+                        server, "POST", "/api/checklist/evaluate",
+                        {
+                            "identity": "manual:match",
+                            "listing": {"title": "후보", "location": "서울 양천구 목동 917-9"},
+                            "profile": "building",
+                        },
+                    )
+                    # 제공 자료 근거로 수동 입력
+                    overridden = _request_json(
+                        server, "POST", "/api/checklist/auto-override",
+                        {
+                            "identity": "manual:match",
+                            "profile": "building",
+                            "overrides": [
+                                {"item_id": "zoning", "status": "pass", "evidence": "일반상업지역 — 의원 허용"},
+                                {"item_id": "elevator", "status": "fail", "evidence": "승강기 없음 · 4층"},
+                            ],
+                        },
+                    )
+                    # 자동 검증을 다시 돌려도 수동 입력은 보존되어야 한다
+                    reevaluated = _request_json(
+                        server, "POST", "/api/checklist/evaluate",
+                        {
+                            "identity": "manual:match",
+                            "listing": {"title": "후보", "location": "서울 양천구 목동 917-9"},
+                            "profile": "building",
+                        },
+                    )
+                    # 빈 상태로 보내면 수동 입력 해제
+                    cleared = _request_json(
+                        server, "POST", "/api/checklist/auto-override",
+                        {
+                            "identity": "manual:match",
+                            "overrides": [{"item_id": "zoning", "status": "", "evidence": ""}],
+                        },
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        zoning0 = next(i for i in evaluated["review"]["items"] if i["item_id"] == "zoning")
+        self.assertEqual(zoning0["status"], "unknown")
+
+        self.assertEqual(overridden["updated"], 2)
+        zoning1 = next(i for i in overridden["review"]["items"] if i["item_id"] == "zoning")
+        self.assertEqual(zoning1["status"], "pass")
+        self.assertEqual(zoning1["source"], "manual")
+        self.assertIn("일반상업지역", zoning1["evidence"])
+
+        zoning2 = next(i for i in reevaluated["review"]["items"] if i["item_id"] == "zoning")
+        self.assertEqual(zoning2["status"], "pass")  # 재평가에도 수동 입력 유지
+        self.assertEqual(zoning2["source"], "manual")
+
+        zoning3 = next(i for i in cleared["review"]["items"] if i["item_id"] == "zoning")
+        self.assertEqual(zoning3["status"], "unknown")  # 해제되어 자동값(미확인)으로 복귀
+        self.assertEqual(zoning3["source"], "auto")
+
+    def test_auto_override_rejects_non_overridable_and_bad_status(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                with self.assertRaises(AssertionError):
+                    # loc_overall은 manual 항목 — 수동 입력(override) 불가
+                    _request_json(
+                        server, "POST", "/api/checklist/auto-override",
+                        {"identity": "a:1", "overrides": [{"item_id": "loc_overall", "status": "pass"}]},
+                    )
+                with self.assertRaises(AssertionError):
+                    _request_json(
+                        server, "POST", "/api/checklist/auto-override",
+                        {"identity": "a:1", "overrides": [{"item_id": "zoning", "status": "maybe"}]},
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+    def test_suggest_fills_cards_from_property_facts(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            clean_env = {k: v for k, v in os.environ.items()
+                         if k not in ("DATA_GO_KR_API_KEY", "VWORLD_API_KEY")}
+            try:
+                with mock.patch.dict("os.environ", clean_env, clear=True):
+                    suggested = _request_json(
+                        server, "POST", "/api/checklist/suggest",
+                        {
+                            "profile": "building",
+                            "listing": {
+                                "title": "세븐일레븐 신림패션점",
+                                "location": "서울특별시 관악구 신림동 1431-1",
+                            },
+                            "facts": {
+                                "zoning": "일반상업지역",
+                                "approval_year": 1983,
+                                "parking_spaces": 0,
+                                "building_area_m2": 401.67,
+                                "floors_total": 4,
+                                "elevator": False,
+                                "main_purpose": "유흥주점/소매점/사무소",
+                            },
+                        },
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        auto = suggested["auto"]
+        self.assertEqual(auto["zoning"]["status"], "pass")
+        # 심평원 조회는 동 이름만 있으면 시도된다 — 키가 없어도 errors.medical로 안내된다.
+        # (require_key가 네트워크 호출 전에 즉시 실패하므로 오프라인에서도 안전)
+        self.assertIn("medical", suggested["errors"])
+        self.assertIn("일반상업지역", auto["zoning"]["evidence"])
+        self.assertEqual(auto["building_age"]["status"], "warn")
+        self.assertEqual(auto["parking"]["status"], "warn")  # 주차 0 < 추정 법정 3
+        self.assertEqual(auto["elevator"]["status"], "fail")  # 4층 + 승강기 없음
+        self.assertEqual(auto["current_use"]["status"], "info")
+        self.assertIn("유흥주점", auto["current_use"]["evidence"])
+
+    def test_report_returns_structured_payload(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            clean_env = {k: v for k, v in os.environ.items()
+                         if k not in ("DATA_GO_KR_API_KEY", "VWORLD_API_KEY")}
+            try:
+                with mock.patch.dict("os.environ", clean_env, clear=True):
+                    payload = _request_json(
+                        server, "POST", "/api/report",
+                        {
+                            "identity": "manual:711",
+                            "profile": "building",
+                            "listing": {
+                                "title": "세븐일레븐 신림패션점",
+                                "location": "서울특별시 관악구 신림동 1431-1",
+                                "zoning": "일반상업지역",
+                                "approval_year": 1983,
+                            },
+                        },
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        # 리포트 렌더에 필요한 키들이 모두 존재해야 한다
+        for key in ("listing", "parcel", "building", "land", "market", "medical", "review", "errors", "generated_at"):
+            self.assertIn(key, payload)
+        self.assertIn("items", payload["review"])
+        self.assertEqual(payload["listing"]["title"], "세븐일레븐 신림패션점")
+        # listing 폴백으로 용도지역은 적합 판정
+        zoning = next(i for i in payload["review"]["items"] if i["item_id"] == "zoning")
+        self.assertEqual(zoning["status"], "pass")
+
     def test_manual_rejects_bad_status_and_item(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

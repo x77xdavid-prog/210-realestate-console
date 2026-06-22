@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>수동 검증 입력 · 210 매물 콘솔</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="verify-body">
+    <main class="verify-shell">
+      <header class="verify-head">
+        <a class="verify-back" href="index.html">← 매물 콘솔로 돌아가기</a>
+        <h1>수동 검증 입력</h1>
+        <p class="verify-subtitle" id="verifySubtitle">매물 정보를 불러오는 중…</p>
+        <p class="verify-lead">
+          공공데이터(API)가 못 채워 <b>‘미확인’</b>으로 남은 항목을, 부동산에서 받은 자료(투자제안서·브리핑)
+          근거로 직접 채웁니다. 저장하면 검토 리포트의 <b>‘자동 검증 근거’</b>에
+          <span class="src-badge">제공 자료</span> 표시와 함께 반영되고, 점수·등급도 다시 계산됩니다.
+          자동 검증을 다시 돌려도 여기서 입력한 값은 보존됩니다.
+        </p>
+      </header>
+
+      <div class="verify-alert" id="verifyAlert" hidden></div>
+
+      <section class="verify-card" id="factsSection">
+        <div class="verify-card-head">
+          <h2>1. 물건 정보 입력 <span class="verify-step-note">제공 자료의 숫자를 넣고 “자동 작성”</span></h2>
+        </div>
+        <p class="verify-hint">
+          용도지역·준공연도·주차·승강기·연면적은 이 값으로 자동 판정됩니다. 입력 후
+          <b>물건 정보로 자동 작성</b>을 누르면 아래 카드가 한 번에 채워집니다.
+          (주소가 있으면 주변 의원·약국·실거래도 함께 조회)
+        </p>
+        <div class="facts-grid">
+          <label class="field">
+            <span>용도지역</span>
+            <input id="factZoning" type="text" placeholder="예: 일반상업지역" />
+          </label>
+          <label class="field">
+            <span>준공연도</span>
+            <input id="factYear" type="number" inputmode="numeric" placeholder="예: 1983" />
+          </label>
+          <label class="field">
+            <span>연면적 (㎡)</span>
+            <input id="factArea" type="number" step="0.01" inputmode="decimal" placeholder="예: 401.67" />
+          </label>
+          <label class="field">
+            <span>대지면적 (㎡)</span>
+            <input id="factLand" type="number" step="0.01" inputmode="decimal" placeholder="예: 181.8" />
+          </label>
+          <label class="field">
+            <span>지상 층수</span>
+            <input id="factFloors" type="number" inputmode="numeric" placeholder="예: 4" />
+          </label>
+          <label class="field">
+            <span>주차대수</span>
+            <input id="factParking" type="number" inputmode="numeric" placeholder="예: 0" />
+          </label>
+          <label class="field">
+            <span>승강기</span>
+            <select id="factElevator">
+              <option value="">모름</option>
+              <option value="true">있음</option>
+              <option value="false">없음</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>주용도 (건축물대장)</span>
+            <input id="factPurpose" type="text" placeholder="예: 유흥주점/소매점/사무소" />
+          </label>
+          <label class="field">
+            <span>매매가 (억 원)</span>
+            <input id="factPrice" type="number" step="0.1" inputmode="decimal" placeholder="예: 42" />
+          </label>
+        </div>
+        <div class="verify-actions">
+          <button id="suggestButton" type="button" class="button primary">물건 정보로 자동 작성</button>
+          <span id="suggestNote" class="verify-note"></span>
+        </div>
+      </section>
+
+      <div class="verify-notice" id="medicalNotice" hidden></div>
+
+      <section class="verify-card" id="cardsSection">
+        <div class="verify-card-head">
+          <h2>2. 검증 카드 — 상태·근거 확인/수정</h2>
+        </div>
+        <p class="verify-hint">
+          각 카드의 상태와 근거 문구를 자유롭게 수정할 수 있습니다.
+          <b>미확인</b>으로 두고 근거를 비우면 저장 시 자동값(공공데이터)으로 되돌아갑니다.
+        </p>
+        <div id="cardList" class="override-list"></div>
+      </section>
+
+      <div class="verify-footer">
+        <button id="saveButton" type="button" class="button primary verify-save">검증 내용 저장</button>
+        <a class="button secondary" href="index.html">취소</a>
+        <span id="saveNote" class="verify-note"></span>
+      </div>
+    </main>
+    <script src="verify.js"></script>
+  </body>
+</html>

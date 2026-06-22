@@ -131,6 +131,11 @@ class EvaluateAutoItemsTests(unittest.TestCase):
         self.assertEqual(result["status"], "info")
         self.assertIn("제2종근린생활시설", result["evidence"])
 
+    def test_current_use_falls_back_to_listing(self):
+        result = evaluate_auto_items({"main_purpose": "유흥주점/소매점/사무소"}, {})["current_use"]
+        self.assertEqual(result["status"], "info")
+        self.assertIn("유흥주점", result["evidence"])
+
     def test_competition_and_pharmacy_unknown_without_medical_data(self):
         results = evaluate_auto_items({}, {})
         self.assertEqual(results["loc_competition"]["status"], "unknown")
@@ -148,6 +153,19 @@ class EvaluateAutoItemsTests(unittest.TestCase):
         result = evaluate_auto_items({}, report)["loc_competition"]
         self.assertEqual(result["status"], "warn")
         self.assertIn("경쟁 밀집", result["evidence"])
+
+    def test_competition_shows_treating_count_context(self):
+        # 정형외과 전문의원 17곳(직접 경쟁) + 정형외과 진료 의원 50곳(넓은 경쟁)을 함께 표시
+        report = {"medical": {
+            "ortho_clinic_count": 17,
+            "ortho_clinic_names": ["a정형외과", "b정형외과", "c정형외과"],
+            "pharmacy_count": 5,
+            "ortho_treating_count": 50,
+        }}
+        result = evaluate_auto_items({}, report)["loc_competition"]
+        self.assertEqual(result["status"], "warn")
+        self.assertIn("정형외과 의원 17곳", result["evidence"])
+        self.assertIn("정형외과 진료 의원 50곳", result["evidence"])
 
     def test_pharmacy_pass_and_warn(self):
         with_pharmacy = {"medical": {"ortho_clinic_count": 0, "ortho_clinic_names": [], "pharmacy_count": 4}}
@@ -236,6 +254,43 @@ class ComputeReviewTests(unittest.TestCase):
     def test_invalid_profile_raises(self):
         with self.assertRaises(ValueError):
             compute_review("hotel", {}, {})
+
+    def test_override_fills_unknown_auto_item(self):
+        # API가 못 채워 미확인이던 용도지역을 제공 자료로 적합 처리
+        auto = {"zoning": {"status": "unknown", "evidence": "용도지역 정보 없음"}}
+        override = {"zoning": {"status": "pass", "evidence": "일반상업지역 — 의원·병원 허용"}}
+        review = compute_review("building", auto, {}, override)
+        row = next(i for i in review["items"] if i["item_id"] == "zoning")
+        self.assertEqual(row["status"], "pass")
+        self.assertEqual(row["evidence"], "일반상업지역 — 의원·병원 허용")
+        self.assertEqual(row["source"], "manual")
+
+    def test_override_wins_over_api_result(self):
+        auto = {"building_age": {"status": "unknown", "evidence": "준공년도 정보 없음"}}
+        override = {"building_age": {"status": "warn", "evidence": "1983년 준공(약 43년)"}}
+        review = compute_review("building", auto, {}, override)
+        row = next(i for i in review["items"] if i["item_id"] == "building_age")
+        self.assertEqual(row["status"], "warn")
+        self.assertIn("1983", row["evidence"])
+
+    def test_non_overridden_rows_report_auto_source(self):
+        auto = {"zoning": {"status": "pass", "evidence": "준주거지역"}}
+        review = compute_review("building", auto, {}, {})
+        row = next(i for i in review["items"] if i["item_id"] == "zoning")
+        self.assertEqual(row["source"], "auto")
+
+    def test_override_evidence_on_info_item(self):
+        # info 항목은 상태는 수동 체크로 확정하되, 근거(evidence)는 override로 채운다
+        override = {"current_use": {"status": "info", "evidence": "B1·2·3F 유흥주점, 1F 소매점+1종근생, 4F 사무소"}}
+        review = compute_review("building", {}, {}, override)
+        row = next(i for i in review["items"] if i["item_id"] == "current_use")
+        self.assertIn("유흥주점", row["evidence"])
+        self.assertEqual(row["source"], "manual")
+
+    def test_override_counts_toward_auto_progress(self):
+        override = {"zoning": {"status": "pass", "evidence": "일반상업지역"}}
+        review = compute_review("building", {}, {}, override)
+        self.assertGreaterEqual(review["progress"]["auto_done"], 1)
 
 
 if __name__ == "__main__":

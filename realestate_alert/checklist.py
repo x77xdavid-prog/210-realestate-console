@@ -241,6 +241,12 @@ CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
 
 ITEM_IDS: frozenset[str] = frozenset(item.item_id for item in CHECKLIST_ITEMS)
 
+# 자동 검증 근거(auto·info)는 공공 API가 못 채우면 '미확인'으로 남는다.
+# 이 항목들은 부동산 제공 자료 등 근거로 수동 입력(override)할 수 있다.
+OVERRIDABLE_ITEM_IDS: frozenset[str] = frozenset(
+    item.item_id for item in CHECKLIST_ITEMS if item.kind in ("auto", "info")
+)
+
 
 def items_for_profile(profile: str) -> list[ChecklistItem]:
     if profile not in PROFILES:
@@ -285,7 +291,7 @@ def evaluate_auto_items(
         "price_market": _judge_price_market(market, building, listing),
         "loc_competition": _judge_competition(medical),
         "loc_pharmacy": _judge_pharmacy(medical),
-        "current_use": _info_current_use(building),
+        "current_use": _info_current_use(building, listing),
         "buildable_volume": _info_buildable_volume(building, listing),
         "land_price_basis": _info_land_price(land, building, listing),
     }
@@ -408,11 +414,20 @@ def _judge_competition(medical: dict[str, Any]) -> dict[str, str]:
         )
     names = medical.get("ortho_clinic_names") or []
     sample = ", ".join(names[:5]) + (" 외" if len(names) > 5 else "")
+    treating = medical.get("ortho_treating_count")
+    treating_note = (
+        f" (정형외과 진료 의원 {treating}곳)"
+        if isinstance(treating, int) and treating > count
+        else ""
+    )
     if count == 0:
-        return _result("pass", "같은 동에 정형외과 의원 없음 — 경쟁 공백 지역")
+        base = "같은 동에 정형외과 전문의원 없음"
+        if isinstance(treating, int) and treating > 0:
+            return _result("pass", f"{base} — 정형외과 진료 의원 {treating}곳은 있음 (직접 경쟁은 적음)")
+        return _result("pass", f"{base} — 경쟁 공백 지역")
     if count < COMPETITION_WARN_COUNT:
-        return _result("pass", f"같은 동 정형외과 의원 {count}곳: {sample}")
-    return _result("warn", f"같은 동 정형외과 의원 {count}곳 — 경쟁 밀집: {sample}")
+        return _result("pass", f"같은 동 정형외과 의원 {count}곳{treating_note}: {sample}")
+    return _result("warn", f"같은 동 정형외과 의원 {count}곳{treating_note} — 경쟁 밀집: {sample}")
 
 
 def _judge_pharmacy(medical: dict[str, Any]) -> dict[str, str]:
@@ -427,8 +442,8 @@ def _judge_pharmacy(medical: dict[str, Any]) -> dict[str, str]:
     return _result("warn", "같은 동 약국 없음 — 건물 내 약국 유치 공간 확보 검토")
 
 
-def _info_current_use(building: dict[str, Any]) -> dict[str, str]:
-    purpose = building.get("main_purpose")
+def _info_current_use(building: dict[str, Any], listing: dict[str, Any] | None = None) -> dict[str, str]:
+    purpose = building.get("main_purpose") or ((listing or {}).get("main_purpose"))
     if not purpose:
         return _result("unknown", "건축물대장 주용도 정보 없음")
     return _result("info", f"현재 주용도: {purpose} — 의원(1종 근생) 해당 여부·용도변경 필요성 판단")
@@ -478,11 +493,21 @@ def compute_review(
     profile: str,
     auto_results: dict[str, dict[str, str]] | None,
     manual_results: dict[str, dict[str, str]] | None,
+    auto_overrides: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """저장된 자동/수동 판정을 항목 정의와 병합해 점수·등급·진행률을 계산한다."""
+    """저장된 자동/수동 판정을 항목 정의와 병합해 점수·등급·진행률을 계산한다.
+
+    auto_overrides: 공공 API가 못 채운 auto·info 항목을 부동산 제공 자료 등으로
+    수동 입력한 값. 같은 item_id의 API 결과보다 우선 적용되며, 자동 검증을
+    다시 돌려도(auto_results 갱신) 보존된다. 각 항목 row에는 근거 출처를 알 수
+    있도록 source("auto"|"manual")를 남긴다.
+    """
     items = items_for_profile(profile)
     auto_results = auto_results or {}
     manual_results = manual_results or {}
+    auto_overrides = auto_overrides or {}
+    # 수동 입력이 같은 항목의 API 결과를 덮어쓴다 (status·evidence 모두).
+    effective_auto = {**auto_results, **auto_overrides}
 
     rows: list[dict[str, Any]] = []
     earned = 0.0
@@ -491,10 +516,11 @@ def compute_review(
     auto_done = auto_total = manual_done = manual_total = 0
 
     for item in items:
-        auto_raw = auto_results.get(item.item_id) or {}
+        auto_raw = effective_auto.get(item.item_id) or {}
         manual_raw = manual_results.get(item.item_id) or {}
         evidence = str(auto_raw.get("evidence", ""))
         memo = str(manual_raw.get("memo", ""))
+        source = "manual" if item.item_id in auto_overrides else "auto"
 
         if item.kind == "auto":
             status = auto_raw.get("status", "unknown")
@@ -524,6 +550,7 @@ def compute_review(
                 "status": status,
                 "evidence": evidence,
                 "memo": memo,
+                "source": source,
             }
         )
 
