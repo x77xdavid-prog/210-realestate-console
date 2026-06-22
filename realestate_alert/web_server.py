@@ -968,6 +968,7 @@ def _listings_payload(config_path: Path) -> dict[str, Any]:
     favorites = store.favorite_identities()
 
     def to_dict(listing: Listing, is_match: bool) -> dict[str, Any]:
+        detail = store.get_detail(listing.identity) if listing.source == "court" else None
         return _listing_to_dict(
             listing,
             is_new=store.is_recent(first_seen.get(listing.identity)),
@@ -976,6 +977,7 @@ def _listings_payload(config_path: Path) -> dict[str, Any]:
             first_seen_at=first_seen.get(listing.identity),
             # 수집량이 수백 건이라 조건 일치 매물만 좌표 변환한다 (나머지는 선택 시 /api/geocode)
             with_coords=is_match,
+            detail=detail,
         )
 
     matched_ids = {listing.identity for listing in snapshot.matched}
@@ -1005,11 +1007,20 @@ def _listings_payload(config_path: Path) -> dict[str, Any]:
     }
 
 
-def _card_extras(listing: Listing) -> dict[str, Any]:
-    """카드 UI에 필요한 추가 필드를 반환한다. _listing_to_dict에 병합된다."""
-    thumbnail_url = (
-        f"/api/photo?path={listing.thumbnail_path}" if listing.thumbnail_path else None
-    )
+def _card_extras(listing: Listing, detail: dict[str, Any] | None = None) -> dict[str, Any]:
+    """카드 UI 추가 필드. court 물건은 저장된 상세(AuctionDetail)에서 도출."""
+    thumbnail_url = None
+    photo_count = listing.photo_count
+    tags = list(listing.incumbrance_tags)
+    if listing.source == "court" and detail:
+        photos = detail.get("photos") or []
+        if photos:
+            thumbnail_url = f"/api/photo?path={photos[0]['file']}"
+        photo_count = len(photos)
+        from realestate_alert.court_auction_detail import extract_incumbrance_tags
+        tags = list(extract_incumbrance_tags(" ".join(detail.get("incumbrances") or [])))
+    elif listing.thumbnail_path:
+        thumbnail_url = f"/api/photo?path={listing.thumbnail_path}"
     detail_link = (
         {
             "id": listing.identity,
@@ -1022,8 +1033,8 @@ def _card_extras(listing: Listing) -> dict[str, Any]:
     )
     return {
         "thumbnail_url": thumbnail_url,
-        "photo_count": listing.photo_count,
-        "incumbrance_tags": list(listing.incumbrance_tags),
+        "photo_count": photo_count,
+        "incumbrance_tags": tags,
         "detail_link": detail_link,
     }
 
@@ -1035,6 +1046,7 @@ def _listing_to_dict(
     is_match: bool = True,
     first_seen_at: str | None = None,
     with_coords: bool = True,
+    detail: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     # HTTP 응답 경로에서는 절대 동기 지오코딩하지 않는다 — 캐시된 좌표만 읽는다(없으면 None).
     # 좌표 워밍은 백그라운드 수집(_warm_match_coords)이 담당한다.
@@ -1082,5 +1094,5 @@ def _listing_to_dict(
         "registry_status": RegistryStatus.NEEDS_CHECK.value,
         "registry_risks": [],
         "registryText": "",
-        **_card_extras(listing),
+        **_card_extras(listing, detail),
     }

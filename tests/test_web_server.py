@@ -666,7 +666,15 @@ class DashboardAuthTests(unittest.TestCase):
 
 
 class CardExtrasTests(unittest.TestCase):
-    """_card_extras(listing) -> dict 직렬화 헬퍼 단위 테스트."""
+    """_card_extras(listing, detail) -> dict 직렬화 헬퍼 단위 테스트.
+
+    court 물건은 저장된 상세(AuctionDetail dict)에서 사진·권리 정보를 도출한다.
+    """
+
+    _COURT_DETAIL = {
+        "photos": [{"file": "court_x/01.jpg", "dvs": "", "seq": 1}],
+        "incumbrances": ["을구 임차권등기 ... 갑구 가등기 인수"],
+    }
 
     def _make_court_listing(self):
         from realestate_alert.models import Listing
@@ -681,9 +689,6 @@ class CardExtrasTests(unittest.TestCase):
             floor="2층",
             premium=None,
             url="https://www.courtauction.go.kr",
-            thumbnail_path="court_x/01.jpg",
-            photo_count=17,
-            incumbrance_tags=("임차권등기",),
             cs_no="2024타경1",
             cort_ofc_cd="B000210",
             gds_seq="1",
@@ -704,31 +709,52 @@ class CardExtrasTests(unittest.TestCase):
             url="https://www.onbid.co.kr",
         )
 
-    def test_court_listing_has_thumbnail_url(self):
+    # --- court listing + stored detail ---
+
+    def test_court_with_detail_has_thumbnail_url(self):
         from realestate_alert.web_server import _card_extras
-        extras = _card_extras(self._make_court_listing())
+        extras = _card_extras(self._make_court_listing(), detail=self._COURT_DETAIL)
         self.assertEqual(extras["thumbnail_url"], "/api/photo?path=court_x/01.jpg")
 
-    def test_court_listing_has_photo_count(self):
+    def test_court_with_detail_has_photo_count(self):
         from realestate_alert.web_server import _card_extras
-        extras = _card_extras(self._make_court_listing())
-        self.assertEqual(extras["photo_count"], 17)
+        extras = _card_extras(self._make_court_listing(), detail=self._COURT_DETAIL)
+        self.assertEqual(extras["photo_count"], 1)
 
-    def test_court_listing_incumbrance_tags_is_list(self):
+    def test_court_with_detail_incumbrance_tags_from_text(self):
         from realestate_alert.web_server import _card_extras
-        extras = _card_extras(self._make_court_listing())
-        self.assertEqual(extras["incumbrance_tags"], ["임차권등기"])
+        extras = _card_extras(self._make_court_listing(), detail=self._COURT_DETAIL)
+        tags = extras["incumbrance_tags"]
+        self.assertIsInstance(tags, list)
+        self.assertIn("임차권등기", tags)
+        self.assertIn("선순위가등기", tags)
 
-    def test_court_listing_has_detail_link(self):
+    def test_court_with_detail_has_detail_link(self):
         from realestate_alert.web_server import _card_extras
         listing = self._make_court_listing()
-        extras = _card_extras(listing)
+        extras = _card_extras(listing, detail=self._COURT_DETAIL)
         self.assertEqual(extras["detail_link"], {
             "id": listing.identity,
             "cs": "2024타경1",
             "court": "B000210",
             "seq": "1",
         })
+
+    # --- court listing without detail (no stored detail yet) ---
+
+    def test_court_without_detail_thumbnail_url_is_none(self):
+        from realestate_alert.web_server import _card_extras
+        extras = _card_extras(self._make_court_listing(), detail=None)
+        self.assertIsNone(extras["thumbnail_url"])
+
+    def test_court_without_detail_still_has_detail_link(self):
+        from realestate_alert.web_server import _card_extras
+        listing = self._make_court_listing()
+        extras = _card_extras(listing, detail=None)
+        self.assertIsNotNone(extras["detail_link"])
+        self.assertEqual(extras["detail_link"]["cs"], "2024타경1")
+
+    # --- non-court (onbid) listing ---
 
     def test_non_court_listing_detail_link_is_none(self):
         from realestate_alert.web_server import _card_extras
