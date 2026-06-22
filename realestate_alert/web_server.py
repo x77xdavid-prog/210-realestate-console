@@ -308,6 +308,26 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                               "error": "현황조사서 조회가 혼잡합니다. 잠시 후 다시 시도하세요."}
                 self._send_json(result)
                 return
+            if self.path.startswith("/api/listing/sale-spec"):
+                q = parse_qs(urlparse(self.path).query)
+                cs_no = (q.get("cs") or [""])[0]
+                cort = (q.get("court") or [""])[0]
+                seq = (q.get("seq") or ["1"])[0]
+                empty = {"dividend_deadline": None, "priority": [], "tenants": [],
+                         "notes": [], "has_data": False}
+                if not cs_no or not cort:
+                    self._send_json({**empty, "error": "cs/court 필요"}, status=400)
+                    return
+                from realestate_alert.court_sale_spec import fetch_sale_spec
+                result = _ext_fetch(
+                    f"salespec:{cort}:{cs_no}:{seq}",
+                    lambda: fetch_sale_spec(cs_no, cort, seq),
+                    lambda r: bool(r) and r.get("has_data"),
+                )
+                if result is None:
+                    result = {**empty, "error": "매각물건명세서 조회가 혼잡합니다. 잠시 후 다시 시도하세요."}
+                self._send_json(result)
+                return
             if self.path.startswith("/api/photo"):
                 q = parse_qs(urlparse(self.path).query)
                 target = safe_photo_path(_photo_dir(config_path), (q.get("path") or [""])[0])

@@ -537,6 +537,16 @@ body::after {
   color: var(--ink-faint);
 }
 
+.dp-salespec-block {
+  border-top: 1px solid var(--line);
+  margin-top: 8px;
+  padding-top: 4px;
+}
+
+.dp-salespec-block .dp-hosp-kv {
+  padding: 4px 16px 10px;
+}
+
 /* ===== Rights / incumbrances ===== */
 .dp-rights-list {
   padding: 14px 18px;

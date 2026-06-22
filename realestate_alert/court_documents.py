@@ -82,10 +82,14 @@ def build_viewer_url(base_url: str, enc_param: str) -> str:
     return f"{base_url}?paramData={param_data}"
 
 
-def sale_spec_viewer_url(
+def sale_spec_doc_info(
     cs_no: str, cort_ofc_cd: str, gds_seq: str, session: DocSession | None = None
-) -> str | None:
-    """매각물건명세서 전자문서 뷰어 딥링크. 데이터·네트워크 실패는 흡수하고 None."""
+) -> dict[str, Any] | None:
+    """매각물건명세서 문서 식별정보(encParam·ecdocId·뷰어 base) 를 한 세션으로 얻는다.
+
+    딥링크(`sale_spec_viewer_url`)와 PDF 텍스트 추출(court_sale_spec) 양쪽이 쓴다.
+    실패는 흡수하고 None.
+    """
     try:
         sess = session or _LiveSession()
         detail = sess.post_detail(build_detail_body(cs_no, cort_ofc_cd, gds_seq))
@@ -100,10 +104,26 @@ def sale_spec_viewer_url(
         url = info.get("url")
         if not enc or not url:
             return None
-        return build_viewer_url(url, enc)
+        return {
+            "viewer_base": url,
+            "enc_param": enc,
+            "ecdoc_id": ecdoc_id,
+            "cs_no": cs_no,
+            "cort_ofc_cd": cort_ofc_cd,
+        }
     except Exception as exc:  # noqa: BLE001 — 외부 호출 실패는 전부 흡수
-        print(f"[court-doc] 매각물건명세서 딥링크 실패 ({cort_ofc_cd} {cs_no}): {exc}")
+        print(f"[court-doc] 매각물건명세서 정보 실패 ({cort_ofc_cd} {cs_no}): {exc}")
         return None
+
+
+def sale_spec_viewer_url(
+    cs_no: str, cort_ofc_cd: str, gds_seq: str, session: DocSession | None = None
+) -> str | None:
+    """매각물건명세서 전자문서 뷰어 딥링크. 데이터·네트워크 실패는 흡수하고 None."""
+    info = sale_spec_doc_info(cs_no, cort_ofc_cd, gds_seq, session=session)
+    if not info:
+        return None
+    return build_viewer_url(info["viewer_base"], info["enc_param"])
 
 
 def _as_int(value: Any) -> Any:

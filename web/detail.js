@@ -658,6 +658,108 @@ async function loadTenants(cs, court) {
   }
 }
 
+// ── 매각물건명세서 (법원 판단: 말소기준·확정·배당·대항력) ──────────────────────
+
+/** GET /api/listing/sale-spec → 매각물건명세서 텍스트 추출·파싱 결과 */
+async function fetchSaleSpec(cs, court, seq) {
+  const qs = new URLSearchParams({ cs, court, seq: seq || "1" }).toString();
+  const resp = await fetch(`/api/listing/sale-spec?${qs}`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+/** 매각물건명세서 분석 결과 렌더 (원문 발췌 — 우측 링크에서 원문 대조 가능) */
+function renderSaleSpec(data) {
+  const body = $("dp-salespec-body");
+  if (!body) return;
+  body.innerHTML = "";
+
+  if (!data || !data.has_data) {
+    body.innerHTML =
+      '<div class="dp-market-empty">매각물건명세서 정보를 불러오지 못했습니다. 원문은 우측 “매각물건명세서” 링크에서 확인하세요.</div>';
+    return;
+  }
+
+  // 핵심 사실: 말소기준권리 + 배당요구종기
+  const facts = [];
+  if (Array.isArray(data.priority) && data.priority.length) {
+    facts.push(["말소기준권리(최선순위 설정)", data.priority.join("   ·   ")]);
+  }
+  if (data.dividend_deadline) facts.push(["배당요구종기", data.dividend_deadline]);
+  if (facts.length) {
+    const kv = document.createElement("div");
+    kv.className = "dp-hosp-kv";
+    facts.forEach(([k, v]) => {
+      const row = document.createElement("div");
+      row.className = "dp-hosp-kv-row";
+      row.innerHTML =
+        `<span class="dp-hosp-kv-key">${escapeHtml(k)}</span>` +
+        `<span class="dp-hosp-kv-val">${escapeHtml(v)}</span>`;
+      kv.appendChild(row);
+    });
+    body.appendChild(kv);
+  }
+
+  // 임차인 (법원 명세서 기준: 전입·확정·보증금·배당요구가 한 줄에 담김)
+  const tenants = Array.isArray(data.tenants) ? data.tenants : [];
+  if (tenants.length) {
+    const wrap = document.createElement("div");
+    wrap.style.overflowX = "auto";
+    const table = document.createElement("table");
+    table.className = "dp-market-table";
+    table.innerHTML =
+      "<thead><tr><th>성명</th><th>점유·임대차 (전입·확정·보증금·배당요구)</th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    tenants.forEach((t) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td>${escapeHtml(t.name || "—")}</td>` +
+        `<td>${escapeHtml(t.detail || "—")}</td>`;
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    body.appendChild(wrap);
+  }
+
+  // 비고 (대항력·인수 주의 등 물건별 특이사항)
+  const notes = Array.isArray(data.notes) ? data.notes : [];
+  if (notes.length) {
+    const title = document.createElement("div");
+    title.className = "dp-subsection-title";
+    title.textContent = "비고";
+    body.appendChild(title);
+    const list = document.createElement("div");
+    list.className = "dp-rights-list";
+    notes.forEach((n) => {
+      const div = document.createElement("div");
+      div.className = "dp-rights-item";
+      div.textContent = n;
+      list.appendChild(div);
+    });
+    body.appendChild(list);
+  }
+}
+
+/** 매각물건명세서 비동기 로드 (논블로킹) */
+async function loadSaleSpec(cs, court, seq) {
+  const body = $("dp-salespec-body");
+  if (!cs || !court) {
+    if (body) body.innerHTML = "";
+    const blk = $("dp-salespec-block");
+    if (blk) blk.hidden = true;
+    return;
+  }
+  try {
+    renderSaleSpec(await fetchSaleSpec(cs, court, seq));
+  } catch (err) {
+    if (body) {
+      body.innerHTML =
+        '<div class="dp-market-empty">매각물건명세서를 분석하지 못했습니다. 원문은 우측 링크에서 확인하세요.</div>';
+    }
+  }
+}
+
 /** 권리분석 인수사항 */
 function renderRights(incumbrances) {
   const wrap = $("dp-rights-content");
@@ -1179,6 +1281,8 @@ async function boot() {
     loadNearbyStats(data.addr_jibun || data.addr_road || "", params.id);
     // 임차인·점유관계(현황조사서)도 비동기로 로드.
     loadTenants(params.cs, params.court);
+    // 매각물건명세서(법원 판단: 말소기준·확정·배당·대항력)도 비동기로 로드.
+    loadSaleSpec(params.cs, params.court, params.seq);
   } catch (err) {
     showError(
       "데이터를 불러올 수 없습니다",
