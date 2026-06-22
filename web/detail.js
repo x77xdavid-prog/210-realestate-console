@@ -87,6 +87,20 @@ function perPyeong(amount, m2) {
 }
 
 /**
+ * 외부(API) URL을 http(s)로만 허용한다. javascript:/data: 등 위험 스킴 차단.
+ * @param {*} url
+ * @returns {string|null} 안전한 절대 URL 또는 null
+ */
+function safeHref(url) {
+  try {
+    const u = new URL(String(url), window.location.origin);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
  * 시군구·동이 포함된 완전한 지번주소를 고른다.
  * court 응답의 addr_jibun(rprsLtnoAddr)은 "508-123"처럼 지번만일 때가 많아
  * 시세·주변통계·주변입주·병원분석의 지역 파싱이 실패한다. jibun_list[0].addr
@@ -633,8 +647,9 @@ function renderSupply(data) {
   const tbody = document.createElement("tbody");
   supplies.forEach((s) => {
     const tr = document.createElement("tr");
-    const link = s.notice_url
-      ? `<a href="${encodeURI(s.notice_url)}" target="_blank" rel="noopener noreferrer">보기</a>`
+    const href = s.notice_url ? safeHref(s.notice_url) : null;
+    const link = href
+      ? `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">보기</a>`
       : "—";
     tr.innerHTML =
       `<td><strong>${escapeHtml(s.move_in_label || "미정")}</strong></td>` +
