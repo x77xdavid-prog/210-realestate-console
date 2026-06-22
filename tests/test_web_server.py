@@ -821,6 +821,64 @@ class DocumentApiTests(unittest.TestCase):
                 server.server_close()
 
 
+class RecommendApiTests(unittest.TestCase):
+    def setUp(self):
+        import realestate_alert.land_info as land_info
+        land_info._geocode_cache.clear()
+
+    def test_api_recommend_returns_ranked_listings(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                _listings_when_ready(server)
+                response = _request_json(server, "GET", "/api/recommend")
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertEqual(response.get("profile"), "ortho")
+        self.assertIn("listings", response)
+        recs = response["listings"]
+        self.assertGreaterEqual(len(recs), 1)
+        first = recs[0]
+        self.assertIn("recommend", first)
+        self.assertEqual(first["recommend"]["rank"], 1)
+        self.assertIsInstance(first["recommend"]["score"], (int, float))
+        self.assertIn("hospital_fit", first)
+        # 점수 내림차순 정렬 보장
+        scores = [r["recommend"]["score"] for r in recs]
+        self.assertEqual(scores, sorted(scores, reverse=True))
+
+    def test_api_recommend_applies_cached_enrichment(self):
+        import realestate_alert.web_server as ws
+        fake = {
+            "market_avg_ppm": 50000.0,
+            "ortho_count": 0,
+            "main_purpose": "제2종근린생활시설",
+            "zoning": "일반상업지역",
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                _listings_when_ready(server)
+                with mock.patch.object(ws, "_recommend_signals", return_value=fake):
+                    response = _request_json(server, "GET", "/api/recommend")
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        recs = response["listings"]
+        self.assertGreaterEqual(len(recs), 1)
+        self.assertGreaterEqual(response["enriched_count"], 1)
+        top = recs[0]["recommend"]
+        self.assertTrue(top["enriched"])
+        self.assertEqual(top["summary"]["competition_note"], "정형외과 0곳")
+
+
 def _diagnostics_when_ready(server: ThreadingHTTPServer, attempts: int = 50) -> dict:
     """진단 엔드포인트를 수집 완료까지 폴링한다 (좌표 변환 없이 캐시만 채운다)."""
     import time as _time

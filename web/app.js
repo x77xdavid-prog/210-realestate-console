@@ -168,6 +168,12 @@ const state = {
   favorites: new Map(),
   ledger: new Map(),
   boardFilter: "all",
+  recommend: [],
+  recommendLoaded: false,
+  recommendLoading: false,
+  recommendEnrichPoll: false,
+  recommendEnrichTries: 0,
+  recommendProfile: "ortho",
   regionFilter: "all",
   fitFilter: "all",
   fetchedPage: 1,
@@ -511,6 +517,9 @@ async function loadServerListings() {
     state.listings = payload.listings || [];
     state.unmatched = payload.unmatched_listings || [];
     state.stats = payload;
+    // 매물이 갱신됐으니 추천 랭킹 캐시를 무효화한다(추천 탭 열려 있으면 즉시 재계산).
+    state.recommendLoaded = false;
+    if (state.boardFilter === "recommend") loadRecommend();
     // 서버가 첫 수집 중이면 잠시 후 자동으로 다시 불러온다
     if (payload.collecting) {
       scheduleCollectingReload();
@@ -831,6 +840,74 @@ function renderFitBoard() {
   `;
 }
 
+/* ===== 병원추천 게시판 ===== */
+
+async function loadRecommend() {
+  if (state.recommendLoading) return;
+  state.recommendLoading = true;
+  let enriching = false;
+  try {
+    const payload = await apiJson(`/api/recommend?profile=${encodeURIComponent(state.recommendProfile)}`);
+    state.recommend = payload.listings || [];
+    enriching = Boolean(payload.enriching);
+  } catch {
+    state.recommend = [];
+  } finally {
+    state.recommendLoaded = true;
+    state.recommendLoading = false;
+  }
+  if (state.boardFilter === "recommend") renderBoard();
+  // 상위 후보 백그라운드 보강이 진행 중이면 잠시 후 한 번 더 불러와 정밀 점수를 반영한다.
+  // 보강이 계속 실패해도 무한 재조회하지 않도록 최대 3회로 제한한다.
+  const MAX_ENRICH_POLLS = 3;
+  if (enriching && !state.recommendEnrichPoll && state.recommendEnrichTries < MAX_ENRICH_POLLS) {
+    state.recommendEnrichPoll = true;
+    state.recommendEnrichTries += 1;
+    setTimeout(() => {
+      state.recommendEnrichPoll = false;
+      state.recommendLoaded = false;
+      if (state.boardFilter === "recommend") loadRecommend();
+    }, 4000);
+  } else if (!enriching) {
+    state.recommendEnrichTries = 0;
+  }
+}
+
+function renderRecommendBoard() {
+  if (!state.recommendLoaded) {
+    if (!state.recommendLoading) loadRecommend();
+    elements.boardGrid.innerHTML = `<div class="empty-state">추천 매물을 분석하는 중…</div>`;
+    return;
+  }
+  if (state.recommend.length === 0) {
+    elements.boardGrid.innerHTML = `<div class="empty-state">추천할 매물이 없습니다. 스캔을 실행하거나 잠시 후 다시 시도하세요.</div>`;
+    return;
+  }
+  elements.boardGrid.innerHTML = state.recommend.map(recommendCardHtml).join("");
+}
+
+function recommendCardHtml(item) {
+  const rec = item.recommend || {};
+  const score = Math.round(rec.score ?? 0);
+  const grade = rec.summary && rec.summary.grade;
+  const fitLabel = (rec.summary && rec.summary.fit_label) || (item.hospital_fit && item.hospital_fit.label) || "";
+  const enriched = Boolean(rec.enriched);
+  const width = Math.max(0, Math.min(100, score));
+  const ribbon = `
+    <div class="rec-ribbon">
+      <span class="rec-rank">#${rec.rank ?? "-"}</span>
+      <span class="rec-score" title="복합 추천 점수">${score}<small>점</small></span>
+      <div class="rec-score-bar"><span style="width:${width}%"></span></div>
+      <div class="rec-tags">
+        ${fitLabel ? `<span class="rec-tag">${escapeHtml(fitLabel)}</span>` : ""}
+        ${grade ? `<span class="rec-tag grade">등급 ${escapeHtml(grade)}</span>` : ""}
+        ${rec.summary && rec.summary.competition_note ? `<span class="rec-tag">${escapeHtml(rec.summary.competition_note)}</span>` : ""}
+        <span class="rec-tag ${enriched ? "ok" : "muted"}">${enriched ? "자동검증" : "기본점수"}</span>
+      </div>
+    </div>`;
+  return `<div class="rec-card-wrap">${ribbon}${listingCardHtml(item)}</div>`;
+}
+
 /* ===== Rendering ===== */
 
 function renderDashboard() {
@@ -965,6 +1042,8 @@ function renderBoard() {
   document.querySelector("#countFavorite").textContent = favorites.length;
   document.querySelector("#countFetched").textContent = all.length + state.unmatched.length;
   document.querySelector("#countFit").textContent = fitGroups().met.length;
+  const recCount = document.querySelector("#countRecommend");
+  if (recCount) recCount.textContent = state.recommendLoaded ? state.recommend.length : (all.length || "");
 
   // '수집 전체'는 수백 건이라 3D 카드 대신 소스별 컴팩트 표로 보여준다(빠르게 뜨고 한눈에).
   const isFetched = state.boardFilter === "fetched";
@@ -974,7 +1053,9 @@ function renderBoard() {
   // 수집 전체는 카드 그리드를 직접 그리므로 board-grid 자체는 블록으로 둔다.
   elements.boardGrid.classList.toggle("plain", isFetched);
 
-  if (state.boardFilter === "fit") {
+  if (state.boardFilter === "recommend") {
+    renderRecommendBoard();
+  } else if (state.boardFilter === "fit") {
     renderFitBoard();
   } else if (state.boardFilter === "fetched") {
     renderFetchedTable();
@@ -994,7 +1075,7 @@ function renderBoard() {
 
   elements.boardGrid.querySelectorAll("[data-action]").forEach((button) => {
     button.addEventListener("click", () => {
-      const listing = [...state.listings, ...state.unmatched].find(
+      const listing = [...state.listings, ...state.unmatched, ...state.recommend].find(
         (item) => identityOf(item) === button.dataset.identity,
       );
       if (!listing) return;
@@ -1008,7 +1089,7 @@ function renderBoard() {
       if (event.target.closest("button, a, select, input")) {
         return;
       }
-      const listing = [...state.listings, ...state.unmatched].find(
+      const listing = [...state.listings, ...state.unmatched, ...state.recommend].find(
         (item) => identityOf(item) === card.dataset.cardIdentity,
       );
       if (!listing) return;

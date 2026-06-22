@@ -41,6 +41,12 @@ from realestate_alert.public_data import PublicDataError
 from realestate_alert.registry import RegistryStatus
 from realestate_alert.filtering import matches_listing
 from realestate_alert.hospital_fit import classify as classify_hospital_fit
+from realestate_alert.recommend import (
+    WEIGHTS as RECOMMEND_PROFILES,
+    baseline_score,
+    enriched_score,
+    extract_recommend_signals,
+)
 from realestate_alert.service import ListingSnapshot, collect_listings, run_once
 from realestate_alert.store import LEDGER_STATUSES, ListingStore
 from realestate_alert.verify import market_for_address, verify_address
@@ -101,6 +107,62 @@ def _ext_fetch(cache_key: str, producer, is_valid) -> Any:
         with _ext_cache_lock:
             _ext_cache[cache_key] = (time.monotonic(), value)
     return value
+
+
+# 추천 상위 후보 보강 캐시 — identity별 검증 신호(시세·경쟁의원·용도지역·주용도)를 캐시.
+# HTTP 요청은 절대 동기 검증하지 않고 캐시만 읽으며, 미보강 상위 후보는 백그라운드로 보강한다.
+_recommend_enrich: dict[str, tuple[float, dict]] = {}
+_recommend_enrich_lock = threading.Lock()
+_recommend_enriching: set[str] = set()
+_RECOMMEND_ENRICH_TTL = 600.0
+
+
+def _recommend_signals(identity: str) -> dict | None:
+    with _recommend_enrich_lock:
+        hit = _recommend_enrich.get(identity)
+        if hit and time.monotonic() - hit[0] < _RECOMMEND_ENRICH_TTL:
+            return hit[1]
+    return None
+
+
+def _enrich_recommend_worker(candidates: list[tuple[str, str]]) -> None:
+    """상위 후보를 공공데이터로 검증해 추천 보강 신호를 캐시한다(백그라운드 전용)."""
+    try:
+        for identity, location in candidates:
+            if not location:
+                continue
+            report = _ext_fetch(
+                f"rec-verify:{location}",
+                lambda loc=location: _verify_report(loc, 6),
+                lambda value: bool(value),
+            )
+            if not report:
+                continue
+            signals = extract_recommend_signals(report)
+            with _recommend_enrich_lock:
+                _recommend_enrich[identity] = (time.monotonic(), signals)
+    finally:
+        # candidates == _start_recommend_enrich 에서 _recommend_enriching 에 넣은 pending 과 동일.
+        # location 이 비어 건너뛴 항목도 거기 등록됐으므로 전부 discard 하는 게 맞다.
+        with _recommend_enrich_lock:
+            for identity, _ in candidates:
+                _recommend_enriching.discard(identity)
+
+
+def _start_recommend_enrich(candidates: list[tuple[str, str]]) -> bool:
+    """아직 보강되지 않은 후보를 백그라운드로 보강 시작한다. 시작했으면 True."""
+    with _recommend_enrich_lock:
+        pending = [
+            (identity, location)
+            for identity, location in candidates
+            if identity not in _recommend_enriching
+        ]
+        if not pending:
+            return False
+        for identity, _ in pending:
+            _recommend_enriching.add(identity)
+    threading.Thread(target=_enrich_recommend_worker, args=(pending,), daemon=True).start()
+    return True
 
 
 def _empty_snapshot() -> ListingSnapshot:
@@ -260,6 +322,15 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 return
             if self.path == "/api/listings":
                 self._send_json(_listings_payload(config_path))
+                return
+            if self.path.startswith("/api/recommend"):
+                query = parse_qs(urlparse(self.path).query)
+                profile = (query.get("profile") or ["ortho"])[0].strip() or "ortho"
+                try:
+                    limit = int((query.get("limit") or ["10"])[0])
+                except ValueError:
+                    limit = 10
+                self._send_json(_recommend_payload(config_path, profile=profile, limit=limit))
                 return
             if self.path.startswith("/api/listing/detail"):
                 q = parse_qs(urlparse(self.path).query)
@@ -1207,6 +1278,117 @@ def _listings_payload(config_path: Path) -> dict[str, Any]:
     }
 
 
+def _recommend_payload(config_path: Path, profile: str = "ortho", limit: int = 10) -> dict[str, Any]:
+    """조건 일치 매물을 병원(정형외과) 복합 추천 점수로 랭킹한다.
+
+    하이브리드 1차(베이스라인): 무료 신호(적합도·할인율·입지)로 전 매물 즉시 점수.
+    이미 체크리스트 검토(등급)가 저장된 매물은 그 등급을 무료로 반영(enriched). 시세·경쟁
+    의원 등 라이브 검증이 필요한 신호는 상위 후보 보강(2c)에서 추가된다.
+    """
+    if profile not in RECOMMEND_PROFILES:
+        profile = "ortho"
+    config = load_config(config_path)
+    snapshot = _cached_snapshot(config_path)
+    store = ListingStore(config.database_path)
+    first_seen = store.first_seen_map()
+    favorites = store.favorite_identities()
+    details = store.get_all_details()
+    summaries = _review_summaries(config_path)
+
+    rows: list[dict[str, Any]] = []
+    for listing in snapshot.matched:
+        fit = classify_hospital_fit(listing, zoning=listing.zoning)
+        grade = (summaries.get(listing.identity) or {}).get("grade")
+        if grade:
+            score = enriched_score(listing, fit, grade=grade, profile=profile)
+            enriched = True
+        else:
+            score = baseline_score(listing, fit, profile=profile)
+            enriched = False
+        rows.append({
+            "score": score, "enriched": enriched, "grade": grade,
+            "fit": fit, "listing": listing, "signals": None,
+        })
+
+    rows.sort(key=lambda row: row["score"], reverse=True)
+
+    # 하이브리드 2차: 베이스라인 상위 후보만 라이브 검증 신호로 보강(캐시 적중분 즉시 반영,
+    # 미보강분은 백그라운드로 채우고 enriching 플래그로 UI 재조회를 유도).
+    need_enrich: list[tuple[str, str]] = []
+    for row in rows[: max(0, limit)]:
+        listing = row["listing"]
+        signals = _recommend_signals(listing.identity)
+        if signals:
+            fit = classify_hospital_fit(
+                listing,
+                zoning=signals.get("zoning") or listing.zoning,
+                main_purpose=signals.get("main_purpose"),
+            )
+            row["fit"] = fit
+            row["signals"] = signals
+            row["enriched"] = True
+            row["score"] = enriched_score(
+                listing, fit, grade=row["grade"],
+                market_avg_ppm=signals.get("market_avg_ppm"),
+                ortho_count=signals.get("ortho_count"),
+                profile=profile,
+            )
+        elif listing.location:
+            need_enrich.append((listing.identity, listing.location))
+
+    # 보강이 필요한 상위 후보가 있으면(새로 시작하든, 이미 백그라운드에서 진행 중이든)
+    # enriching=True 로 UI가 잠시 후 재조회하도록 한다.
+    enriching = False
+    if need_enrich:
+        _start_recommend_enrich(need_enrich)
+        with _recommend_enrich_lock:
+            enriching = any(identity in _recommend_enriching for identity, _ in need_enrich)
+    rows.sort(key=lambda row: row["score"], reverse=True)
+
+    listings: list[dict[str, Any]] = []
+    for rank, row in enumerate(rows, start=1):
+        listing = row["listing"]
+        fit = row["fit"]
+        signals = row["signals"] or {}
+        detail = details.get(listing.identity) if listing.source == "court" else None
+        item = _listing_to_dict(
+            listing,
+            is_new=store.is_recent(first_seen.get(listing.identity)),
+            is_favorite=listing.identity in favorites,
+            is_match=True,
+            first_seen_at=first_seen.get(listing.identity),
+            with_coords=False,
+            detail=detail,
+        )
+        item["hospital_fit"] = fit
+        ortho = signals.get("ortho_count")
+        item["recommend"] = {
+            "score": row["score"],
+            "rank": rank,
+            "enriched": row["enriched"],
+            "summary": {
+                "fit_label": fit["label"],
+                "grade": row["grade"],
+                "competition_note": (f"정형외과 {ortho}곳" if ortho is not None else None),
+                "market_avg_ppm": signals.get("market_avg_ppm"),
+            },
+        }
+        listings.append(item)
+
+    progress = _collect_progress.get(str(config_path))
+    collecting = bool(progress and progress.get("phase") != "done")
+    return {
+        "profile": profile,
+        "enriched_count": sum(1 for row in rows if row["enriched"]),
+        "listings": listings,
+        "collecting": collecting,
+        "enriching": enriching,
+        "limit": limit,
+        "generated_at": _utc_now_iso(),
+        "collected_at": _snapshot_collected_at.get(str(config_path)),
+    }
+
+
 def _card_extras(listing: Listing, detail: dict[str, Any] | None = None) -> dict[str, Any]:
     """카드 UI 추가 필드. court 물건은 저장된 상세(AuctionDetail)에서 도출."""
     thumbnail_url = None
@@ -1255,7 +1437,7 @@ def _listing_to_dict(
         "identity": listing.identity,
         "source": listing.source,
         "external_id": listing.external_id,
-        "hospital_fit": classify_hospital_fit(listing),
+        "hospital_fit": classify_hospital_fit(listing, zoning=listing.zoning),
         "usage": listing.usage,
         "title": listing.title,
         "location": listing.location,
