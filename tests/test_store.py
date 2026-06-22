@@ -118,3 +118,16 @@ class ChecklistReviewStoreTests(unittest.TestCase):
             store.save_checklist_review("a:1", {"profile": "building", "auto": {}, "manual": {}})
             store.delete_ledger_entry("a:1")
             self.assertIsNone(store.get_checklist_review("a:1"))
+
+    def test_upsert_and_get_detail(self):
+        import tempfile
+        from pathlib import Path
+        from realestate_alert.store import ListingStore
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ListingStore(Path(tmp) / "t.db")
+            store.initialize()
+            store.upsert_detail("court:x-1", {"appraisal": 1, "photos": ["a"]})
+            store.upsert_detail("court:x-1", {"appraisal": 2, "photos": ["a", "b"]})  # 덮어쓰기
+            got = store.get_detail("court:x-1")
+            self.assertEqual(got["appraisal"], 2)
+            self.assertIsNone(store.get_detail("court:none"))

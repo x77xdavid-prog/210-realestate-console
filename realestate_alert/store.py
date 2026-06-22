@@ -63,6 +63,15 @@ class ListingStore:
                     )
                     """
                 )
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS auction_detail (
+                        identity TEXT PRIMARY KEY,
+                        detail_json TEXT NOT NULL,
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
 
     def mark_seen_if_new(self, listing: Listing) -> bool:
         self.initialize()
@@ -234,6 +243,28 @@ class ListingStore:
                     "DELETE FROM checklist_reviews WHERE identity = ?", (identity,)
                 )
                 return cursor.rowcount > 0
+
+    def upsert_detail(self, identity: str, detail_json: dict) -> None:
+        self.initialize()
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute(
+                    """
+                    INSERT INTO auction_detail (identity, detail_json, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(identity) DO UPDATE SET
+                        detail_json = excluded.detail_json, updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (identity, json.dumps(detail_json, ensure_ascii=False)),
+                )
+
+    def get_detail(self, identity: str) -> dict | None:
+        self.initialize()
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT detail_json FROM auction_detail WHERE identity = ?", (identity,)
+            ).fetchone()
+        return json.loads(row[0]) if row else None
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.database_path)
