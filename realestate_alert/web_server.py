@@ -328,6 +328,23 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                     result = {**empty, "error": "매각물건명세서 조회가 혼잡합니다. 잠시 후 다시 시도하세요."}
                 self._send_json(result)
                 return
+            if self.path.startswith("/api/nearby-supply"):
+                q = parse_qs(urlparse(self.path).query)
+                region = (q.get("region") or [""])[0].strip()
+                if not region:
+                    self._send_json({"region": "", "supplies": [], "error": "region 필요"}, status=400)
+                    return
+                from realestate_alert.cheongyak import nearby_supply_report
+                result = _ext_fetch(
+                    f"supply:{region}",
+                    lambda: nearby_supply_report(region),
+                    lambda r: bool(r) and r.get("error") is None,
+                )
+                if result is None:
+                    result = {"region": region, "supplies": [],
+                              "error": "주변 입주예정 조회가 혼잡합니다. 잠시 후 다시 시도하세요."}
+                self._send_json(result)
+                return
             if self.path.startswith("/api/photo"):
                 q = parse_qs(urlparse(self.path).query)
                 target = safe_photo_path(_photo_dir(config_path), (q.get("path") or [""])[0])
