@@ -592,6 +592,24 @@ class ChecklistApiTests(unittest.TestCase):
         self.assertTrue(response["listings"][0]["first_seen_at"])
 
 
+class CalendarPayloadTests(unittest.TestCase):
+    def test_calendar_payload_cached(self):
+        import tempfile
+        from pathlib import Path
+        from realestate_alert.web_server import build_calendar_payload
+        from realestate_alert.store import ListingStore
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ListingStore(Path(tmp) / "t.db"); store.initialize()
+            calls = {"n": 0}
+            def compute():
+                calls["n"] += 1
+                return {"ym": "202606", "days": {"23": 30}, "courts_for": {}}
+            a = build_calendar_payload(store, "202606", compute)
+            b = build_calendar_payload(store, "202606", compute)  # 캐시 → compute 1회
+            self.assertEqual(a["days"]["23"], 30)
+            self.assertEqual(calls["n"], 1)
+
+
 class DetailPayloadTests(unittest.TestCase):
     def test_detail_payload_uses_cache(self):
         import tempfile

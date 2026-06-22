@@ -72,6 +72,15 @@ class ListingStore:
                     )
                     """
                 )
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS calendar_cache (
+                        ym TEXT PRIMARY KEY,
+                        data_json TEXT NOT NULL,
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
 
     def mark_seen_if_new(self, listing: Listing) -> bool:
         self.initialize()
@@ -265,6 +274,28 @@ class ListingStore:
                 "SELECT detail_json FROM auction_detail WHERE identity = ?", (identity,)
             ).fetchone()
         return json.loads(row[0]) if row else None
+
+    def get_calendar(self, ym: str) -> dict | None:
+        self.initialize()
+        with closing(self._connect()) as connection:
+            row = connection.execute(
+                "SELECT data_json FROM calendar_cache WHERE ym = ?", (ym,)
+            ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def save_calendar(self, ym: str, data: dict) -> None:
+        self.initialize()
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute(
+                    """
+                    INSERT INTO calendar_cache (ym, data_json, updated_at)
+                    VALUES (?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(ym) DO UPDATE SET
+                        data_json = excluded.data_json, updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (ym, json.dumps(data, ensure_ascii=False)),
+                )
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.database_path)

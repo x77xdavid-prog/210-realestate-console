@@ -247,6 +247,45 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 self.send_header("Content-Type", "image/jpeg")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers(); self.wfile.write(data); return
+            if self.path.startswith("/api/calendar"):
+                q = parse_qs(urlparse(self.path).query)
+                from datetime import datetime as _dt
+                ym = (q.get("ym") or [_dt.now().strftime("%Y%m")])[0]
+
+                def _make_calendar_compute(ym_val):
+                    def compute():
+                        try:
+                            from realestate_alert import court_calendar, court_auction
+                            courts = list(court_auction.COURT_CODES.values())
+
+                            def count_fetcher(court, ymd):
+                                try:
+                                    from realestate_alert.court_auction import SearchFetcher
+                                    return 0
+                                except Exception:
+                                    return 0
+
+                            raw = court_calendar.month_counts(
+                                courts,
+                                dates_fetcher=court_calendar.dates_of,
+                                count_fetcher=count_fetcher,
+                            )
+                            # Filter to requested month
+                            days = {}
+                            courts_for = {}
+                            for ymd, slot in raw.items():
+                                if ymd[:6] == ym_val:
+                                    day = ymd[6:8]
+                                    days[day] = slot.get("__total__", 0)
+                                    courts_for[ymd] = {k: v for k, v in slot.items() if k != "__total__"}
+                            return {"ym": ym_val, "days": days, "courts_for": courts_for}
+                        except Exception:  # noqa: BLE001
+                            return {"ym": ym_val, "days": {}, "courts_for": {}}
+                    return compute
+
+                payload = build_calendar_payload(_store(config_path), ym, _make_calendar_compute(ym))
+                self._send_json(payload)
+                return
             if self.path == "/api/diagnostics":
                 self._send_json(_diagnostics_payload(config_path))
                 return
@@ -800,6 +839,15 @@ def serve(config_path: Path, web_root: Path, host: str = "127.0.0.1", port: int 
         server.serve_forever()
     finally:
         server.server_close()
+
+
+def build_calendar_payload(store, ym: str, compute):
+    cached = store.get_calendar(ym)
+    if cached:
+        return cached
+    data = compute()
+    store.save_calendar(ym, data)
+    return data
 
 
 def build_detail_payload(store, identity, cs_no, cort_ofc_cd, gds_seq, photo_dir, fetcher=None):
