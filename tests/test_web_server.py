@@ -879,6 +879,23 @@ class RecommendApiTests(unittest.TestCase):
         self.assertEqual(top["summary"]["competition_note"], "정형외과 0곳")
 
 
+class ListingSerializationTests(unittest.TestCase):
+    def test_listing_to_dict_serializes_bid_period(self):
+        from realestate_alert.web_server import _listing_to_dict
+        from realestate_alert.models import Listing
+
+        listing = Listing(
+            source="onbid", external_id="2026-1", title="[공매] 목동 근린상가",
+            location="서울 양천구 목동 1", deposit=0, monthly_rent=0, area_m2=100.0,
+            floor=None, premium=None, url="https://www.onbid.co.kr",
+            sale_date="20260617", bid_begin="20260615", bid_end="20260617",
+        )
+        d = _listing_to_dict(listing, with_coords=False)
+        self.assertEqual(d["source"], "onbid")
+        self.assertEqual(d["bid_begin"], "20260615")
+        self.assertEqual(d["bid_end"], "20260617")
+
+
 def _diagnostics_when_ready(server: ThreadingHTTPServer, attempts: int = 50) -> dict:
     """진단 엔드포인트를 수집 완료까지 폴링한다 (좌표 변환 없이 캐시만 채운다)."""
     import time as _time

@@ -113,10 +113,10 @@
             </div>
             <span class="status-pill neutral">날짜를 누르면 그날 입찰 매물만 표시</span>
           </div>
-          <div class="cal-tabs">
-            <span class="cal-tab cal-tab-on">경매일정</span>
-            <span class="cal-tab">경매신건</span>
-            <span class="cal-tab">매각결과</span>
+          <div class="cal-tabs" role="tablist" aria-label="경매/공매 필터">
+            <button type="button" class="cal-tab cal-tab-on" data-cal-kind="all">전체</button>
+            <button type="button" class="cal-tab" data-cal-kind="court">경매</button>
+            <button type="button" class="cal-tab" data-cal-kind="onbid">공매</button>
           </div>
           <div id="calendarContainer"></div>
         </section>

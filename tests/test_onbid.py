@@ -85,12 +85,19 @@ class OnbidSourceTests(unittest.TestCase):
         self.assertIn("감정가 1,850,000,000원", building.buildable_note)
         self.assertIn("최저입찰 1,480,000,000원", building.buildable_note)
         self.assertIn("입찰진행중", building.buildable_note)
+        # 공매 입찰기간을 구조화 필드로 추출(YYYYMMDD)
+        self.assertEqual(building.bid_begin, "20260615")
+        self.assertEqual(building.bid_end, "20260617")
+        self.assertEqual(building.sale_date, "20260617")
 
         land = listings[1]
         self.assertEqual(land.property_type, "land")
         self.assertEqual(land.area_m2, 310.0)
         # 물건명에 지번이 없으면 시도/시군구/읍면동 조합을 사용한다
         self.assertEqual(land.location, "서울특별시 양천구 목동")
+        # 입찰일자가 없으면 None
+        self.assertIsNone(land.bid_begin)
+        self.assertIsNone(land.bid_end)
 
     def test_fetch_without_key_returns_empty(self):
         with mock.patch.dict("os.environ", {}, clear=True):

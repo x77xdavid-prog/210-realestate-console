@@ -1447,6 +1447,8 @@ def _listing_to_dict(
         "min_bid_price": listing.min_bid_price,
         "fail_count": listing.fail_count,
         "sale_date": listing.sale_date,
+        "bid_begin": listing.bid_begin,
+        "bid_end": listing.bid_end,
         "area_m2": listing.area_m2,
         "floor": listing.floor,
         "premium": listing.premium,

@@ -49,16 +49,30 @@ def _listing_from_dict(data: dict, default_source: str) -> Listing:
         approval_year=_optional_int(data.get("approval_year")),
         elevator=None if data.get("elevator") is None else bool(data.get("elevator")),
         buildable_note=None if data.get("buildable_note") is None else str(data.get("buildable_note")),
+        appraisal_price=_optional_int(data.get("appraisal_price")),
+        min_bid_price=_optional_int(data.get("min_bid_price")),
+        fail_count=_optional_int(data.get("fail_count")),
+        sale_date=None if data.get("sale_date") is None else str(data.get("sale_date")),
+        bid_begin=None if data.get("bid_begin") is None else str(data.get("bid_begin")),
+        bid_end=None if data.get("bid_end") is None else str(data.get("bid_end")),
     )
 
 
 def _optional_float(value) -> float | None:
     if value is None:
         return None
+    if isinstance(value, str):
+        value = value.replace(",", "").strip()
+        if not value:
+            return None
     return float(value)
 
 
 def _optional_int(value) -> int | None:
     if value is None:
         return None
+    if isinstance(value, str):
+        value = value.replace(",", "").strip()
+        if not value:
+            return None
     return int(value)

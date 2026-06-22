@@ -151,6 +151,8 @@ def _listing_from_item(item: dict[str, Any]) -> Listing | None:
         appraisal_price=appraisal or None,
         min_bid_price=_first_int(lowest_bid),
         sale_date=end[:8] if len(end) >= 8 else None,
+        bid_begin=begin[:8] if len(begin) >= 8 else None,
+        bid_end=end[:8] if len(end) >= 8 else None,
         land_area_m2=land_area,
         building_area_m2=building_area,
         buildable_note=" · ".join(note_parts),

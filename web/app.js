@@ -1347,8 +1347,27 @@ const calState = {
   ym: null,       // "YYYYMM" currently displayed
   data: null,     // cached API response for current ym
   selDay: null,   // selected day number (1-31)
+  kind: "all",    // 캘린더 필터: all | court(경매) | onbid(공매)
   loading: false,
 };
+
+// 매물의 경매 종류 — court=법원경매, onbid=온비드 공매
+function auctionKind(listing) {
+  if (!listing) return "other";
+  if (listing.source === "onbid") return "onbid";
+  if (listing.source === "court") return "court";
+  return "other";
+}
+
+// YYYYMMDD → "M/D" (입찰기간 표기용)
+function fmtMd(ymd) {
+  const s = String(ymd || "");
+  if (s.length < 8) return "";
+  const m = parseInt(s.slice(4, 6), 10);
+  const d = parseInt(s.slice(6, 8), 10);
+  if (isNaN(m) || isNaN(d)) return "";
+  return `${m}/${d}`;
+}
 
 function currentYm() {
   const now = new Date();
@@ -1368,9 +1387,12 @@ function renderAuctionCalendar(ym) {
   calState.ym = ym;
 
   // Build cal object from collected listings (no fetch needed)
-  const rows = [...state.listings, ...(state.unmatched || [])];
+  const kind = calState.kind || "all";
+  const allRows = [...state.listings, ...(state.unmatched || [])];
+  const rows = kind === "all" ? allRows : allRows.filter((r) => auctionKind(r) === kind);
   const days = {};
   const hospDays = {};
+  const onbidDays = {};
   for (const row of rows) {
     const sd = String(row.sale_date || "");
     if (sd.length !== 8) continue;
@@ -1381,9 +1403,10 @@ function renderAuctionCalendar(ym) {
     if (lvl === "open" || lvl === "build") {
       hospDays[dd] = (hospDays[dd] || 0) + 1;
     }
+    if (auctionKind(row) === "onbid") onbidDays[dd] = true;
   }
 
-  const cal = { ym, days, hospDays };
+  const cal = { ym, days, hospDays, onbidDays, kind };
   calState.data = cal;
 
   // Pick initial selected day: busiest, else today if present, else first with items
@@ -1438,9 +1461,10 @@ function buildCalendarHtml(cal, selDay) {
     if (wd === 6) cls.push("cal-sat");
     if (d === selDay) cls.push("cal-sel");
     if (d === todayDay) cls.push("cal-today");
+    const hasOnbid = cal.kind === "all" && cal.onbidDays && cal.onbidDays[dd];
     const clickAttr = count != null ? `data-calday="${d}"` : "";
     gridHtml += `<div class="${cls.join(" ")}" ${clickAttr}>
-      <div class="cal-dn">${d}</div>${count != null ? `<div class="cal-cn">(${count.toLocaleString()})</div>` : ""}
+      <div class="cal-dn">${d}</div>${count != null ? `<div class="cal-cn">(${count.toLocaleString()})</div>` : ""}${hasOnbid ? `<span class="cal-onbid-dot" title="공매 포함"></span>` : ""}
     </div>`;
   }
 
@@ -1450,11 +1474,14 @@ function buildCalendarHtml(cal, selDay) {
   const totalForDay = (cal.days && cal.days[selDD]) || 0;
   const hospForDay = (cal.hospDays && cal.hospDays[selDD]) || 0;
 
-  const rows = [...state.listings, ...(state.unmatched || [])];
-  const dayListings = rows.filter((r) => String(r.sale_date || "") === selYmd);
+  const calKind = cal.kind || calState.kind || "all";
+  const allDayRows = [...state.listings, ...(state.unmatched || [])];
+  const dayListings = (calKind === "all" ? allDayRows : allDayRows.filter((r) => auctionKind(r) === calKind))
+    .filter((r) => String(r.sale_date || "") === selYmd);
+  const kindLabel = { all: "전체", court: "경매", onbid: "공매" }[calKind] || "전체";
 
   let courtHtml = `<div class="cal-crow cal-crow-all">
-    <span class="cal-cnm">전체 ${totalForDay.toLocaleString()}건</span>
+    <span class="cal-cnm">${kindLabel} ${totalForDay.toLocaleString()}건</span>
     ${hospForDay ? `<span class="cal-ccnt sched-fit">병원 후보 ${hospForDay}</span>` : ""}
   </div>`;
   for (const item of dayListings) {
@@ -1463,13 +1490,29 @@ function buildCalendarHtml(cal, selDay) {
     const minBid = item.min_bid_price != null ? `최저 ${cdtWon(item.min_bid_price)}` : "";
     const appraisal = item.appraisal_price != null ? `감정 ${cdtWon(item.appraisal_price)}` : "";
     const priceHtml = [minBid, appraisal].filter(Boolean).join(" / ");
+    const k = auctionKind(item);
+    const srcBadge = k === "onbid"
+      ? `<span class="cal-src onbid">공매</span>`
+      : k === "court"
+      ? `<span class="cal-src court">경매</span>`
+      : "";
+    const bidPeriod = (k === "onbid" && item.bid_begin && item.bid_end)
+      ? `<span class="cal-bidperiod">입찰 ${fmtMd(item.bid_begin)}~${fmtMd(item.bid_end)}</span>`
+      : "";
+    const onbidHref = k === "onbid" && item.url ? safeHref(item.url) : "#";
+    const onbidLink = onbidHref !== "#"
+      ? `<a class="cal-onbid-link" href="${escapeHtml(onbidHref)}" target="_blank" rel="noreferrer">온비드↗</a>`
+      : "";
     const clickable = item.detail_link
       ? `style="cursor:pointer" data-cal-identity="${escapeHtml(identityOf(item))}"`
       : "";
     courtHtml += `<div class="cal-crow${isHosp ? " cal-crow-hosp" : ""}" ${clickable}>
-      <span class="cal-cnm">${escapeHtml(item.title || item.location || "-")}</span>
-      ${priceHtml ? `<span class="cal-ccnt">${priceHtml}</span>` : ""}
+      <span class="cal-cnm">${srcBadge}${escapeHtml(item.title || item.location || "-")}</span>
+      <span class="cal-cmeta">${bidPeriod}${priceHtml ? `<span class="cal-ccnt">${priceHtml}</span>` : ""}${onbidLink}</span>
     </div>`;
+  }
+  if (dayListings.length === 0) {
+    courtHtml += `<div class="cal-crow cal-empty">해당 유형 일정이 없습니다</div>`;
   }
 
   const selDateLabel = `${year}. ${String(month).padStart(2, "0")}. ${String(selDay).padStart(2, "0")}`;
@@ -3481,6 +3524,17 @@ document.querySelector("#rangeReset").addEventListener("click", () => {
 document.querySelectorAll("[data-board-filter]").forEach((chip) => {
   chip.addEventListener("click", () => {
     setBoardFilter(chip.dataset.boardFilter);
+  });
+});
+
+// 캘린더 경매/공매 필터 탭
+document.querySelectorAll("[data-cal-kind]").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    calState.kind = tab.dataset.calKind;
+    calState.selDay = null; // 필터 바뀌면 해당 유형의 가장 바쁜 날을 다시 고르도록
+    document.querySelectorAll("[data-cal-kind]").forEach((t) =>
+      t.classList.toggle("cal-tab-on", t.dataset.calKind === calState.kind));
+    renderAuctionCalendar(calState.ym);
   });
 });
 

@@ -40,6 +40,8 @@ class Listing:
     gds_seq: str | None = None
     latitude: float | None = None
     longitude: float | None = None
+    bid_begin: str | None = None  # 공매 입찰 시작일 YYYYMMDD
+    bid_end: str | None = None  # 공매 입찰 마감일 YYYYMMDD
 
     @property
     def identity(self) -> str:

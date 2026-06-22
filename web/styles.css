@@ -1305,6 +1305,9 @@ td span {
   border-radius: 10px 10px 0 0;
   position: relative;
   top: 1px;
+  background: transparent;
+  border: 1px solid transparent;
+  font-family: inherit;
 }
 
 .cal-tab-on {
@@ -1392,6 +1395,7 @@ td span {
 }
 
 .cal-cell {
+  position: relative;
   min-height: 62px;
   border-radius: 10px;
   padding: 7px 8px;
@@ -1538,6 +1542,74 @@ td span {
 .cal-crow:hover {
   background: var(--teal-soft);
   border-radius: 6px;
+}
+
+/* ===== 캘린더 경매/공매 구분 ===== */
+.cal-cmeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.cal-src {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 99px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.cal-src.court {
+  color: var(--teal);
+  background: var(--teal-soft);
+}
+.cal-src.onbid {
+  color: #9a5b00;
+  background: #fdebcf;
+}
+.cal-bidperiod {
+  font-size: 11.5px;
+  color: #9a5b00;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.cal-onbid-link {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #9a5b00;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.cal-onbid-link:hover {
+  text-decoration: underline;
+}
+.cal-empty {
+  justify-content: center;
+  color: var(--ink-faint);
+  font-style: italic;
+}
+/* 전체 보기에서 공매가 있는 날 표식 (.cal-cell 의 position:relative 기준 배치) */
+.cal-onbid-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e08a1e;
+}
+/* 사이드패널 항목: 제목 위 / 입찰기간·가격 아래로 쌓아 좁은 2단에서도 읽히게 */
+.cal-court-grid .cal-crow:not(.cal-crow-all) {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+.cal-cnm {
+  word-break: keep-all;
+}
+.cal-cmeta {
+  flex-wrap: wrap;
 }
 
 /* ===== 병원 적합도 배지 ===== */
