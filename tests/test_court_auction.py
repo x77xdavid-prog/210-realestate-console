@@ -37,6 +37,10 @@ SAMPLE_ITEMS = [
         "pjbBuldList": "철근콘크리트조 900㎡",
         "jiwonNm": "서울남부지방법원",
         "jpDeptNm": "경매7계",
+        "boCd": "B000212",
+        "wgs84Xcordi": "126.85",
+        "wgs84Ycordi": "37.52",
+        "maxArea": "900",
     },
     {  # 같은 사건·물건 회차 중복 → 1건으로
         "srnSaNo": "2024타경1009",
@@ -115,6 +119,17 @@ class CourtAuctionTests(unittest.TestCase):
 
         broken = CourtAuctionSource(fetcher=boom)
         self.assertEqual(broken.fetch(), [])  # 실패해도 빈 목록 (다른 소스 진행)
+
+    def test_fetch_captures_detail_keys(self):
+        source = CourtAuctionSource(
+            court_code="B000212", begin_ymd="20260612", end_ymd="20260710",
+            fetcher=lambda body: _result(SAMPLE_ITEMS),
+        )
+        listing = source.fetch()[0]
+        self.assertEqual(listing.cs_no, "2024타경1009")
+        self.assertEqual(listing.cort_ofc_cd, "B000212")
+        self.assertEqual(listing.gds_seq, "1")
+        self.assertAlmostEqual(listing.latitude, 37.52, places=2)
 
 
 if __name__ == "__main__":

@@ -150,6 +150,13 @@ def _to_int(value: Any) -> int:
         return 0
 
 
+def _to_float(value: Any) -> float | None:
+    try:
+        return float(str(value).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return None
+
+
 def _listing_from_item(item: dict[str, Any]) -> Listing | None:
     case_no = str(item.get("srnSaNo", "")).strip()
     item_ser = str(item.get("maemulSer", "")).strip() or "1"
@@ -207,6 +214,12 @@ def _listing_from_item(item: dict[str, Any]) -> Listing | None:
         fail_count=yuchal or None,
         sale_date=sale_date if len(sale_date) == 8 else None,
         buildable_note=" · ".join(note_parts) + (f" · {building_desc}" if building_desc else ""),
+        cs_no=case_no,
+        cort_ofc_cd=str(item.get("boCd", "")).strip() or None,
+        gds_seq=item_ser,
+        latitude=_to_float(item.get("wgs84Ycordi")),
+        longitude=_to_float(item.get("wgs84Xcordi")),
+        building_area_m2=_to_float(item.get("maxArea")),
     )
 
 
