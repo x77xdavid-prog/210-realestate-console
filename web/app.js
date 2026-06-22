@@ -1013,7 +1013,7 @@ function renderBoard() {
       );
       if (!listing) return;
       if (listing.detail_link) {
-        openCourtDetail(listing.detail_link);
+        openCourtDetail(listing.detail_link, listing);
         return;
       }
       handleCardAction("map", listing);
@@ -3585,7 +3585,7 @@ function cdtFmtDate(s) {
   return `${s.slice(0, 4)}.${s.slice(4, 6)}.${s.slice(6, 8)}`;
 }
 
-async function openCourtDetail(link) {
+async function openCourtDetail(link, listing) {
   const url =
     `/api/listing/detail?id=${encodeURIComponent(link.id)}` +
     `&cs=${encodeURIComponent(link.cs)}` +
@@ -3644,18 +3644,21 @@ async function openCourtDetail(link) {
     d.appraisal && d.min_bid
       ? Math.round((1 - d.min_bid / d.appraisal) * 100)
       : null;
+  const usageDisplay = listing?.usage || d.usage || "-";
+  const landM2 = d.land_m2 ?? listing?.land_area_m2 ?? null;
+  const bldgM2 = d.bldg_m2 ?? listing?.building_area_m2 ?? null;
   const basicRows = [
-    ["용도", escapeHtml(d.usage || "-")],
+    ["용도", escapeHtml(usageDisplay)],
     [
       "토지",
-      d.land_m2 != null
-        ? `${Number(d.land_m2).toLocaleString()}㎡ (${cdtPyeong(d.land_m2)})`
+      landM2 != null
+        ? `${Number(landM2).toLocaleString()}㎡ (${cdtPyeong(landM2)})`
         : "-",
     ],
     [
       "건물",
-      d.bldg_m2 != null
-        ? `${Number(d.bldg_m2).toLocaleString()}㎡ (${cdtPyeong(d.bldg_m2)})`
+      bldgM2 != null
+        ? `${Number(bldgM2).toLocaleString()}㎡ (${cdtPyeong(bldgM2)})`
         : "-",
     ],
     ["감정가", cdtWon(d.appraisal)],
