@@ -877,23 +877,21 @@ dd {
 
 .board-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 18px;
   margin-top: 20px;
-  perspective: 1400px;
 }
 
 .listing-card {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 22px;
+  gap: 12px;
+  padding: 18px;
   border-radius: var(--radius-lg);
   background: var(--surface-strong);
   border: 1px solid var(--line);
   box-shadow: var(--shadow-float);
-  transform-style: preserve-3d;
   transition: box-shadow 0.35s var(--ease-out), border-color 0.3s;
   overflow: hidden;
   cursor: pointer;
@@ -1019,16 +1017,17 @@ dd {
 
 .card-actions {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   margin-top: auto;
-  transform: translateZ(28px);
 }
 
 .card-actions .button {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   white-space: nowrap;
+  padding: 7px 10px;
+  font-size: 0.74rem;
 }
 
 .empty-state {
@@ -1871,8 +1870,8 @@ td span {
 /* --- card thumbnail --- */
 .card-thumb {
   position: relative;
-  margin: -22px -22px 0;
-  height: 150px;
+  margin: -18px -18px 0;
+  height: 158px;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   overflow: hidden;
   background: var(--line);

@@ -1100,7 +1100,6 @@ function renderBoard() {
       handleCardAction("map", listing);
     });
   });
-  attachTilt(elements.boardGrid.querySelectorAll(".listing-card"));
 }
 
 function listingCardHtml(listing) {
@@ -1123,7 +1122,7 @@ function listingCardHtml(listing) {
     return `<div class="card-thumb"><div class="thumb-ph">사진 준비중</div></div>`;
   })();
   return `
-    <article class="listing-card${isFavorite ? " is-favorite" : ""}" data-tilt
+    <article class="listing-card${isFavorite ? " is-favorite" : ""}"
       data-card-identity="${escapeHtml(identity)}" title="클릭하면 상세 정보로 이동">
       ${thumbHtml}
       <div class="card-top">

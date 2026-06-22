@@ -251,6 +251,29 @@ def _store_snapshot(key: str, snapshot: ListingSnapshot, config, complete: bool)
         _snapshot_fetched_at[key] = time.monotonic() - ttl + RETRY_SOON_SECONDS
 
 
+def _enrich_court_photos(config, snapshot: ListingSnapshot) -> None:
+    """법원경매 후보의 상세·사진을 백그라운드로 보강해 보드 카드에 썸네일이 뜨게 한다.
+
+    이미 저장된 건은 건너뛰고(캐시), 외부호출 실패는 흡수한다. 수집 완료 표시 뒤에
+    돌므로 스피너를 늦추지 않으며, 보강된 썸네일은 다음 목록 조회부터 반영된다.
+    """
+    try:
+        import time as _time
+        from realestate_alert.service import enrich_candidates, is_court_hospital_candidate
+
+        photo_dir = config.database_path.parent / "photos"
+        photo_dir.mkdir(parents=True, exist_ok=True)
+        store = ListingStore(config.database_path)
+        store.initialize()
+        enrich_candidates(
+            snapshot.fetched, store, photo_dir,
+            is_candidate=is_court_hospital_candidate,
+            sleep=lambda: _time.sleep(1),
+        )
+    except Exception as exc:  # noqa: BLE001 — 사진 보강 실패는 흡수
+        print(f"[collect] 사진 보강 실패: {exc}")
+
+
 def _run_collection(config_path: Path) -> None:
     """백그라운드에서 수집해 캐시를 채운다. 동시 중복 수집은 막는다."""
     key = str(config_path)
@@ -264,6 +287,7 @@ def _run_collection(config_path: Path) -> None:
         _store_snapshot(key, snapshot, config, complete)
         # 완료 표시 후 좌표를 천천히 채운다(스피너와 무관, 지도 핀은 다음 새로고침에 표시).
         _warm_match_coords(snapshot.matched)
+        _enrich_court_photos(config, snapshot)
     except Exception as error:  # noqa: BLE001 — 수집 실패는 다음 주기에 재시도
         print(f"[collect] 백그라운드 수집 실패: {error}")
     finally:
