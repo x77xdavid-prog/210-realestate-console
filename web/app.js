@@ -1380,7 +1380,7 @@ function buildCalendarHtml(cal, selDay) {
     const appraisal = item.appraisal_price != null ? `감정 ${cdtWon(item.appraisal_price)}` : "";
     const priceHtml = [minBid, appraisal].filter(Boolean).join(" / ");
     const clickable = item.detail_link
-      ? `style="cursor:pointer" data-cal-detail="${escapeHtml(item.detail_link)}"`
+      ? `style="cursor:pointer" data-cal-identity="${escapeHtml(identityOf(item))}"`
       : "";
     courtHtml += `<div class="cal-crow${isHosp ? " cal-crow-hosp" : ""}" ${clickable}>
       <span class="cal-cnm">${escapeHtml(item.title || item.location || "-")}</span>
@@ -1446,9 +1446,13 @@ function buildCalendarHtml(cal, selDay) {
   });
 
   // Wire side-panel listing clicks → open detail modal
-  container.querySelectorAll("[data-cal-detail]").forEach((row) => {
+  container.querySelectorAll("[data-cal-identity]").forEach((row) => {
     row.addEventListener("click", () => {
-      openCourtDetail(row.dataset.calDetail);
+      const id = row.dataset.calIdentity;
+      const ls = [...state.listings, ...(state.unmatched || [])].find(
+        (x) => identityOf(x) === id,
+      );
+      if (ls && ls.detail_link) openCourtDetail(ls.detail_link, ls);
     });
   });
 }
