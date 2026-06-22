@@ -86,6 +86,21 @@ function perPyeong(amount, m2) {
   return won(Math.round(Number(amount) / pyeongVal)) + "/평";
 }
 
+/**
+ * 시군구·동이 포함된 완전한 지번주소를 고른다.
+ * court 응답의 addr_jibun(rprsLtnoAddr)은 "508-123"처럼 지번만일 때가 많아
+ * 시세·주변통계·주변입주·병원분석의 지역 파싱이 실패한다. jibun_list[0].addr
+ * (시도 시군구 읍면동 지번)을 우선 쓰고, 없으면 addr_road, 마지막으로 addr_jibun.
+ * @param {object} d
+ * @returns {string}
+ */
+function fullAddress(d) {
+  if (Array.isArray(d.jibun_list) && d.jibun_list.length && d.jibun_list[0] && d.jibun_list[0].addr) {
+    return d.jibun_list[0].addr;
+  }
+  return d.addr_road || d.addr_jibun || "";
+}
+
 // ── URL params ────────────────────────────────────────────────────────────────
 
 function getParams() {
@@ -570,6 +585,84 @@ async function loadNearbyStats(currentAddr, currentIdentity) {
   } catch (err) {
     if (body) {
       body.innerHTML = '<div class="dp-market-empty">주변 통계를 불러오지 못했습니다.</div>';
+    }
+  }
+}
+
+// ── 주변 입주예정 (청약홈 분양정보) ────────────────────────────────────────────
+
+/** GET /api/nearby-supply?region= → 같은 시군구 입주예정 분양 */
+async function fetchSupply(region) {
+  const resp = await fetch(`/api/nearby-supply?region=${encodeURIComponent(region)}`);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+
+/** 주변 입주예정 렌더 */
+function renderSupply(data) {
+  const body = $("dp-supply-body");
+  if (!body) return;
+  body.innerHTML = "";
+
+  if (data && data.error) {
+    body.innerHTML =
+      '<div class="dp-market-empty">주변 분양정보를 불러오지 못했습니다. (청약홈 API)</div>';
+    return;
+  }
+  const supplies = data && Array.isArray(data.supplies) ? data.supplies : [];
+  const region = (data && data.region) || "";
+  if (supplies.length === 0) {
+    body.innerHTML =
+      `<div class="dp-market-empty">${escapeHtml(region || "해당 지역")}에 입주예정 신규 분양이 없습니다.</div>`;
+    return;
+  }
+
+  const total = supplies.reduce((sum, s) => sum + (Number(s.total_households) || 0), 0);
+  const summary = document.createElement("div");
+  summary.className = "dp-tenant-meta";
+  summary.textContent =
+    `${region} 입주예정 ${supplies.length}개 단지 · 총 ${total.toLocaleString("ko-KR")}세대 (미래 배후수요)`;
+  body.appendChild(summary);
+
+  const wrap = document.createElement("div");
+  wrap.style.overflowX = "auto";
+  const table = document.createElement("table");
+  table.className = "dp-market-table";
+  table.innerHTML =
+    "<thead><tr><th>입주예정</th><th>단지명</th><th>세대수</th><th>구분</th><th>위치</th><th>공고</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  supplies.forEach((s) => {
+    const tr = document.createElement("tr");
+    const link = s.notice_url
+      ? `<a href="${encodeURI(s.notice_url)}" target="_blank" rel="noopener noreferrer">보기</a>`
+      : "—";
+    tr.innerHTML =
+      `<td><strong>${escapeHtml(s.move_in_label || "미정")}</strong></td>` +
+      `<td>${escapeHtml(s.house_name || "—")}</td>` +
+      `<td>${s.total_households != null ? Number(s.total_households).toLocaleString("ko-KR") + "세대" : "—"}</td>` +
+      `<td>${escapeHtml(s.house_type || "—")}</td>` +
+      `<td>${escapeHtml((s.address || "").slice(0, 30))}</td>` +
+      `<td>${link}</td>`;
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  body.appendChild(wrap);
+}
+
+/** 주변 입주예정 비동기 로드 (논블로킹). 주소에서 시군구를 뽑아 조회 */
+async function loadSupply(addr) {
+  const body = $("dp-supply-body");
+  const region = parseRegion(addr).gu;
+  if (!region) {
+    if (body) body.innerHTML = '<div class="dp-market-empty">지역 정보를 확인할 수 없습니다.</div>';
+    return;
+  }
+  try {
+    renderSupply(await fetchSupply(region));
+  } catch (err) {
+    if (body) {
+      body.innerHTML = '<div class="dp-market-empty">주변 분양정보를 불러오지 못했습니다.</div>';
     }
   }
 }
@@ -1236,7 +1329,7 @@ function showError(msg, sub) {
 function renderAll(d) {
   renderCaseHeader(d);
   renderGallery(d.photos);
-  renderMap(d.latitude, d.longitude, d.addr_jibun || d.addr_road);
+  renderMap(d.latitude, d.longitude, fullAddress(d));
   renderBasicTable(d);
   renderPriceCards(d);
   renderRights(d.incumbrances);
@@ -1272,13 +1365,16 @@ async function boot() {
 
     elLoading.hidden = true;
     renderAll(data);
-    initHospitalAnalysis(data.addr_jibun || data.addr_road || "");
+    const addr = fullAddress(data);  // 시군구 포함 완전 주소(지역 파싱용)
+    initHospitalAnalysis(addr);
     elBody.hidden = false;
 
     // 실거래 시세는 본문 표시 후 비동기로 채운다 (외부 API 지연이 페이지를 막지 않도록).
-    loadMarket(data.addr_jibun || data.addr_road || "");
+    loadMarket(addr);
     // 주변 경매 통계도 비동기로 집계 (자체 수집 데이터).
-    loadNearbyStats(data.addr_jibun || data.addr_road || "", params.id);
+    loadNearbyStats(addr, params.id);
+    // 주변 입주예정(청약홈)도 비동기로 로드.
+    loadSupply(addr);
     // 임차인·점유관계(현황조사서)도 비동기로 로드.
     loadTenants(params.cs, params.court);
     // 매각물건명세서(법원 판단: 말소기준·확정·배당·대항력)도 비동기로 로드.
