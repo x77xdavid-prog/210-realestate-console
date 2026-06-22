@@ -878,6 +878,26 @@ class RecommendApiTests(unittest.TestCase):
         self.assertTrue(top["enriched"])
         self.assertEqual(top["summary"]["competition_note"], "정형외과 0곳")
 
+    def test_api_recommend_failed_enrichment_stays_baseline(self):
+        # 검증 실패(모든 신호 None)는 enriched로 표시하지 않고 재시도하지 않는다(enriching False).
+        import realestate_alert.web_server as ws
+        none_sig = {"market_avg_ppm": None, "ortho_count": None, "main_purpose": None, "zoning": None}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                _listings_when_ready(server)
+                with mock.patch.object(ws, "_recommend_signals", return_value=none_sig):
+                    response = _request_json(server, "GET", "/api/recommend")
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertEqual(response["enriched_count"], 0)
+        self.assertFalse(response["enriching"])
+        self.assertFalse(response["listings"][0]["recommend"]["enriched"])
+
 
 class ListingSerializationTests(unittest.TestCase):
     def test_listing_to_dict_serializes_bid_period(self):

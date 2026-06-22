@@ -115,6 +115,9 @@ _recommend_enrich: dict[str, tuple[float, dict]] = {}
 _recommend_enrich_lock = threading.Lock()
 _recommend_enriching: set[str] = set()
 _RECOMMEND_ENRICH_TTL = 600.0
+# 검증 실패(타임아웃 등) 시 캐시할 "시도함" 마커 — 모든 신호 None.
+# 매 요청마다 같은 주소를 무한 재시도하지 않게 하고, enriching 플래그가 settle 되게 한다.
+_RECOMMEND_NO_SIGNALS = {"market_avg_ppm": None, "ortho_count": None, "main_purpose": None, "zoning": None}
 
 
 def _recommend_signals(identity: str) -> dict | None:
@@ -126,19 +129,26 @@ def _recommend_signals(identity: str) -> dict | None:
 
 
 def _enrich_recommend_worker(candidates: list[tuple[str, str]]) -> None:
-    """상위 후보를 공공데이터로 검증해 추천 보강 신호를 캐시한다(백그라운드 전용)."""
+    """상위 후보를 공공데이터로 검증해 추천 보강 신호를 캐시한다(백그라운드 전용).
+
+    한 건의 외부호출 실패(타임아웃 등)가 배치 전체를 막지 않도록 매 후보를 개별
+    try로 감싼다. 실패한 후보도 '시도함' 마커를 캐시해 무한 재시도를 방지한다.
+    """
     try:
         for identity, location in candidates:
             if not location:
                 continue
-            report = _ext_fetch(
-                f"rec-verify:{location}",
-                lambda loc=location: _verify_report(loc, 6),
-                lambda value: bool(value),
-            )
-            if not report:
-                continue
-            signals = extract_recommend_signals(report)
+            signals = _RECOMMEND_NO_SIGNALS
+            try:
+                report = _ext_fetch(
+                    f"rec-verify:{location}",
+                    lambda loc=location: _verify_report(loc, 6),
+                    lambda value: bool(value),
+                )
+                if report:
+                    signals = extract_recommend_signals(report)
+            except Exception as exc:  # noqa: BLE001 — 한 건 실패가 배치를 막지 않게
+                print(f"[recommend] 보강 실패({identity}): {exc}")
             with _recommend_enrich_lock:
                 _recommend_enrich[identity] = (time.monotonic(), signals)
     finally:
@@ -1318,15 +1328,20 @@ def _recommend_payload(config_path: Path, profile: str = "ortho", limit: int = 1
     for row in rows[: max(0, limit)]:
         listing = row["listing"]
         signals = _recommend_signals(listing.identity)
-        if signals:
+        if signals is not None:
+            # 시도됨(성공/실패 모두) — 재시도하지 않는다. 실데이터가 하나라도 있으면 enriched.
+            has_data = any(
+                signals.get(key) is not None
+                for key in ("market_avg_ppm", "ortho_count", "main_purpose", "zoning")
+            )
             fit = classify_hospital_fit(
                 listing,
                 zoning=signals.get("zoning") or listing.zoning,
                 main_purpose=signals.get("main_purpose"),
             )
             row["fit"] = fit
-            row["signals"] = signals
-            row["enriched"] = True
+            row["signals"] = signals if has_data else None
+            row["enriched"] = row["enriched"] or has_data
             row["score"] = enriched_score(
                 listing, fit, grade=row["grade"],
                 market_avg_ppm=signals.get("market_avg_ppm"),
