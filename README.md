@@ -35,10 +35,12 @@
 python -m realestate_alert init-db --config config.example.json
 python -m realestate_alert run-once --config config.example.json
 python -m realestate_alert serve-web --config config.example.json --port 8765
-python -m realestate_alert export-registry-targets --config config.example.json --output data/registry-targets.csv
+python -m realestate_alert export-registry-targets --config config.example.json --output registry-targets.csv
 ```
 
 `serve-web` 실행 후 http://127.0.0.1:8765/ 를 열면 대시보드가 표시됩니다. `watch` 명령을 사용하면 `interval_seconds` 간격으로 자동 스캔합니다.
+
+> `export-registry-targets` 의 상대 `--output` 은 DB와 같은 폴더(데이터 디스크)에 저장됩니다. 이전 예시의 `--output data/registry-targets.csv` 는 이제 `data/` 하위에 중첩되므로 `--output registry-targets.csv` 를 사용하세요.
 
 ## 대시보드
 
@@ -145,6 +147,55 @@ python -m realestate_alert analyze-registry --file path\to\registry.txt
 ```powershell
 python -m realestate_alert estimate-purchase --purchase-price 1000000000 --loan-amount 600000000 --cash-available 450000000 --acquisition-tax-rate 0.046 --brokerage-rate 0.009 --legal-fee 2000000 --other-costs 3000000
 ```
+
+## 배포·운영 (Render 영구 디스크)
+
+프로덕션은 Render Web Service(도메인 `210.mapsaihelp.com`)로 배포됩니다. **데이터(매물장·관심·사진·문서·검증 DB)가 재배포 후에도 살아남으려면 두 가지가 모두 충족돼야 합니다.**
+
+**1) 시작 명령이 `config.render.json` 을 가리킬 것**
+
+`config.render.json` 의 `database_path` 가 `/data/seen.sqlite3` 라서, 사진은 `/data/photos`, 업로드 문서는 `/data/documents` 로 저장됩니다. 시작 명령이 `config.example.json`/`config.local.json` 을 쓰면 데이터가 `<repo>/data`(휘발성)로 새어 재배포 시 사라집니다.
+
+```
+python -m realestate_alert serve-web --config config.render.json --host 0.0.0.0 --port $PORT
+```
+
+- `--host 0.0.0.0` 와 `--port $PORT` 는 Render 헬스체크/라우팅에 필수입니다(기본값 127.0.0.1 이면 접속 불가).
+- 서버 기동 시 로그 상단에 `[persistence]` 배너가 출력됩니다. 배포 후 Render → **Logs** 에서 다음을 확인하세요:
+  - `[persistence] data dir : /data` — 경로가 `/data` 가 아니면 시작 명령(config)이 잘못된 것.
+  - `[persistence] disk mount : /data = YES` — **`NO  <-- 휘발성!` 이면 영구 디스크가 안 붙은 상태**(아래 2번 수행 필요). `os.path.ismount` 로 자동 감지하므로, 디스크 부착 여부를 로그만으로 확인할 수 있습니다.
+
+**2) `/data` 에 영구 디스크(Persistent Disk)가 마운트돼 있을 것** *(핵심)*
+
+영구 디스크가 없으면 `/data` 는 컨테이너의 휘발성 저장소라 **재배포·재시작마다 초기화**됩니다.
+
+이미 떠 있는 서비스에 디스크를 추가하는 절차(Blueprint 불필요, 도메인·환경변수 그대로 유지):
+
+1. Render 대시보드 → 해당 서비스 → **Disks** 탭 → **Add Disk**
+2. **Name** `data`, **Mount Path** `/data`, **Size** `1 GB` → Add
+3. 디스크 부착을 위해 자동으로 1회 재배포됩니다.
+
+⚠️ 주의사항:
+- **유료 플랜 필요** — Free 인스턴스는 디스크를 마운트할 수 없습니다(필요 시 Starter 이상으로 업그레이드).
+- **단일 인스턴스 고정** — 디스크는 한 인스턴스에만 붙으므로 수평 확장 불가(SQLite 단일 프로세스라 적절). 부하 증가는 인스턴스 등급 상향(scale-up)으로만 대응.
+- **첫 마운트 시 기존 휘발성 `/data` 내용은 가려집니다** — 디스크가 빈 볼륨으로 `/data` 위에 마운트되므로, 보존하고 싶은 기존 `seen.sqlite3` 가 있으면 디스크 추가 **전에** Shell 로 내려받아 두었다가 추가 후 복원하세요. (사진은 매물 enrich 시 재수집되고 매물장 DB도 다시 채워지므로, 처음부터 비워도 무방합니다.)
+
+**환경변수**
+
+| 변수 | 용도 |
+|------|------|
+| `DASHBOARD_PASSWORD` | 대시보드 Basic 인증 비밀번호(임차인 실명 보호상 **필수**) |
+| `DATA_GO_KR_API_KEY` | 공공데이터포털(건축물대장·실거래·심평원·청약홈) |
+| `VWORLD_API_KEY` | VWorld 지오코딩·토지정보 |
+| `VWORLD_DOMAIN` | VWorld 키에 등록한 도메인(`https://210.mapsaihelp.com`). 기본 localhost면 거부됨 |
+| `KAKAO_JS_KEY` | 지도 표시(선택) |
+| `GMAIL_APP_PASSWORD` | gmail notifier 사용 시(선택) |
+
+**백업**
+
+Render 디스크는 서비스가 삭제되면 함께 사라지고 자동 백업이 보장되지 않습니다. SQLite 는 주기적으로 외부 저장소로 복사해 두세요(예: Render Cronjob 에서 `sqlite3 /data/seen.sqlite3 ".backup '/tmp/seen.bak'"` 후 외부 업로드, 또는 Disks 페이지의 스냅샷 기능 활성화).
+
+이 구성은 저장소의 [`render.yaml`](render.yaml) 에 코드로도 명문화돼 있습니다(현재 수동 생성 서비스에서는 참고용이며 무시됨, Blueprint 연결 시 사용).
 
 ## 주의
 

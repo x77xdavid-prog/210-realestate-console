@@ -1,0 +1,55 @@
+# Render 배포 정의 (Infrastructure-as-Code)
+#
+# ⚠️ 현재 라이브 서비스(210.mapsaihelp.com)는 대시보드에서 "수동 생성"된
+#    Git 연결 Web Service 로 추정됩니다. 그런 서비스는 이 render.yaml 을 "무시"하므로,
+#    이 파일을 커밋해도 라이브 배포에는 아무 영향이 없습니다(안전).
+#
+#    이 파일의 용도:
+#      1) 시작 명령 + 영구 디스크 + 환경변수를 코드로 명문화(문서화·재현용)
+#      2) 향후 새 환경을 Blueprint 로 띄울 때 그대로 사용
+#
+# 🚫 Blueprint(청사진)로 연결할 때 주의: 아래 `name` 이 기존 서비스 이름과
+#    "정확히" 일치해야 기존 서비스를 흡수(adopt)합니다. 다르면 도메인·디스크가 없는
+#    "중복 서비스"가 새로 생깁니다. Blueprint 연결 전 대시보드에서 실제 서비스 이름을
+#    확인해 아래 `name` 에 그대로 넣으세요.
+#
+# 👉 "이미 떠 있는 서비스에 디스크만 추가"하려면 Blueprint 가 필요 없습니다.
+#    대시보드 → 해당 서비스 → Disks → Add Disk (Name: data, Mount Path: /data, Size: 1GB).
+#    자세한 절차는 README.md 의 "배포·운영(Render 영구 디스크)" 참고.
+
+services:
+  - type: web
+    name: realestate-alert            # ← 기존 서비스 이름과 정확히 일치시킬 것 (Blueprint 흡수 조건)
+    runtime: python
+    plan: starter                     # 영구 디스크는 유료 플랜에서만 가능(Free 불가)
+    region: singapore                 # ← 기존 서비스가 실제로 떠 있는 리전으로 맞출 것
+    buildCommand: pip install -r requirements.txt
+    # serve-web 기본값은 127.0.0.1 이라 Render 헬스체크가 닿지 못한다 → 0.0.0.0 + $PORT 필수.
+    # --config config.render.json 이어야 데이터가 /data(영구 디스크)로 저장된다.
+    startCommand: python -m realestate_alert serve-web --config config.render.json --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+    disk:
+      name: data
+      mountPath: /data                # config.render.json 의 database_path=/data/seen.sqlite3
+                                       # photos → /data/photos, documents → /data/documents
+      sizeGB: 1                        # 나중에 키울 수는 있어도 줄일 수 없음 → 작게 시작
+    envVars:
+      - key: PYTHON_VERSION
+        # 라이브 응답 헤더에서 확인된 버전: x-render-origin-server: SimpleHTTP/0.6 Python/3.14.3
+        # 자동 메이저 업그레이드로 인한 깨짐을 막기 위해 고정. 패치 제거로 빌드가 실패하면 "3.14"로 완화.
+        value: "3.14.3"
+      - key: RENDER
+        value: "true"                 # 시작 배너의 휘발성 경고 가드용(Render가 자동 주입하기도 함)
+      - key: DASHBOARD_PASSWORD
+        sync: false                   # 비밀번호: 대시보드에서만 입력(임차인 실명 보호상 필수)
+      - key: DATA_GO_KR_API_KEY
+        sync: false
+      - key: VWORLD_API_KEY
+        sync: false
+      - key: KAKAO_JS_KEY
+        sync: false
+      - key: VWORLD_DOMAIN
+        value: https://210.mapsaihelp.com   # land_info 가 읽음(기본 localhost면 VWorld 거부)
+      # config.render.json 의 notifiers 에 gmail 을 켰다면 아래도 추가:
+      # - key: GMAIL_APP_PASSWORD
+      #   sync: false

@@ -930,7 +930,105 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
     return RealEstateAlertHandler
 
 
+def persistence_warning(
+    data_dir: str,
+    on_render: bool,
+    writable: bool,
+    disk_mounted: bool | None = None,
+) -> str | None:
+    """Render에서 데이터가 휘발성/쓰기불가 경로면 경고 사유를 돌려준다(정상이면 None).
+
+    순수 함수라 단위 테스트가 쉽다. on_disk(경로) 판정은 경로 컴포넌트 경계로 맞춰
+    `/database`·`/datastore` 같은 접두 오탐을 피한다.
+
+    - "outside-disk": 경로 자체가 /data 밖 (시작 명령이 잘못된 config) → 휘발성.
+    - "no-disk": 경로는 /data 가 맞지만 거기에 영구 디스크가 "마운트되지 않음" → 휘발성.
+      (config 는 맞는데 대시보드에서 디스크를 안 붙인, priority 1 의 핵심 케이스)
+    - "not-writable": /data 에 디스크는 있으나 쓰기 불가.
+    disk_mounted=None 이면 마운트 여부를 판단할 수 없어 no-disk 경고는 건너뛴다.
+    """
+    if not on_render:
+        return None
+    normalized = data_dir.replace("\\", "/")
+    on_disk = normalized == "/data" or normalized.startswith("/data/")
+    if not on_disk:
+        return "outside-disk"
+    if disk_mounted is False:
+        return "no-disk"
+    if not writable:
+        return "not-writable"
+    return None
+
+
+def report_startup_persistence(config_path: Path) -> None:
+    """서버 시작 시 데이터가 실제로 어디에 저장되는지 명확히 출력하고,
+    Render에서 영구 디스크(/data) 밖의 휘발성 경로로 잘못 설정되면 크게 경고한다.
+
+    배너 자체가 기동을 막지 않도록 모든 예외를 삼킨다(쓰기 점검 결과만 보고한다).
+    프로덕션에서 흔한 실수 — 시작 명령이 config.render.json 이 아닌 config.example.json
+    을 가리켜 데이터가 <repo>/data(휘발성)로 새는 것 — 을 로그에서 바로 잡아낼 수 있다.
+    """
+    try:
+        cfg = load_config(config_path)
+        db = cfg.database_path
+        data_dir = db.parent
+        print("=" * 60, flush=True)
+        print(f"[persistence] config     : {config_path}", flush=True)
+        print(f"[persistence] database   : {db}", flush=True)
+        print(f"[persistence] data dir   : {data_dir}", flush=True)
+        print(f"[persistence]   photos   : {data_dir / 'photos'}", flush=True)
+        print(f"[persistence]   documents: {data_dir / 'documents'}", flush=True)
+        writable = True
+        detail = ""
+        try:
+            data_dir.mkdir(parents=True, exist_ok=True)
+            probe = data_dir / ".write_probe"
+            try:
+                probe.write_text("ok", encoding="utf-8")
+            finally:
+                probe.unlink(missing_ok=True)
+        except OSError as exc:
+            writable = False
+            detail = str(exc)
+        print(
+            f"[persistence] writable   : {'YES' if writable else 'NO  <-- ' + detail}",
+            flush=True,
+        )
+        on_render = bool(os.environ.get("RENDER"))
+        # /data 가 실제 영구 디스크 마운트인지 best-effort 감지(휘발성 dir 과 구분).
+        disk_mounted: bool | None = None
+        normalized_dir = str(data_dir).replace("\\", "/")
+        if on_render and (normalized_dir == "/data" or normalized_dir.startswith("/data/")):
+            try:
+                disk_mounted = os.path.ismount("/data")
+            except OSError:
+                disk_mounted = None
+            label = {True: "YES", False: "NO  <-- 휘발성!", None: "unknown"}[disk_mounted]
+            print(f"[persistence] disk mount : /data = {label}", flush=True)
+        warning = persistence_warning(str(data_dir), on_render, writable, disk_mounted)
+        if warning == "outside-disk":
+            print("!" * 60, flush=True)
+            print("[persistence] 경고: Render 환경인데 데이터가 영구 디스크(/data) 밖입니다.", flush=True)
+            print("[persistence] 재배포/재시작 시 매물장·관심·사진·문서가 모두 사라집니다.", flush=True)
+            print("[persistence] 시작 명령이 '--config config.render.json' 인지 확인하세요.", flush=True)
+            print("!" * 60, flush=True)
+        elif warning == "no-disk":
+            print("!" * 60, flush=True)
+            print("[persistence] 경고: /data 에 영구 디스크가 마운트되지 않았습니다(휘발성).", flush=True)
+            print("[persistence] 재배포/재시작 시 매물장·관심·사진·문서가 모두 사라집니다.", flush=True)
+            print("[persistence] 대시보드 → 서비스 → Disks → Add Disk (Mount Path /data).", flush=True)
+            print("!" * 60, flush=True)
+        elif warning == "not-writable":
+            print("!" * 60, flush=True)
+            print("[persistence] 경고: /data 쓰기 불가 — Persistent Disk 마운트를 확인하세요.", flush=True)
+            print("!" * 60, flush=True)
+        print("=" * 60, flush=True)
+    except Exception as exc:  # noqa: BLE001 — 배너는 기동을 막지 않는다
+        print(f"[persistence] 시작 점검 건너뜀: {exc}", flush=True)
+
+
 def serve(config_path: Path, web_root: Path, host: str = "127.0.0.1", port: int = 8765) -> None:
+    report_startup_persistence(config_path)
     handler = create_handler(config_path=config_path, web_root=web_root)
     server = ThreadingHTTPServer((host, port), handler)
     print(f"Serving dashboard at http://{host}:{port}/")

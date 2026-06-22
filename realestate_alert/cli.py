@@ -37,7 +37,8 @@ def main(argv: list[str] | None = None) -> int:
 
     registry_targets = subparsers.add_parser("export-registry-targets")
     registry_targets.add_argument("--config", required=True)
-    registry_targets.add_argument("--output", default="data/registry-targets.csv")
+    # 상대 경로는 데이터 디스크(DB와 같은 폴더, Render에선 /data)에 저장된다.
+    registry_targets.add_argument("--output", default="registry-targets.csv")
 
     analyze_registry = subparsers.add_parser("analyze-registry")
     analyze_registry.add_argument("--file", required=True)
@@ -90,7 +91,9 @@ def main(argv: list[str] | None = None) -> int:
         matched = [listing for listing in listings if matches_listing(config.criteria, listing)]
         output_path = Path(args.output)
         if not output_path.is_absolute():
-            output_path = Path(args.config).parent / output_path
+            # 데이터 디스크(DB와 같은 폴더 = Render의 영구 디스크 /data)에 저장되도록
+            # database_path 기준으로 해석한다 — 재배포 시 유실 방지.
+            output_path = config.database_path.parent / output_path
         export_registry_targets(matched, output_path)
         print(f"exported={len(matched)} path={output_path}")
         return 0
