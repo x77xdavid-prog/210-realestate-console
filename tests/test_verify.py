@@ -1,10 +1,16 @@
+import json
 import unittest
 from unittest import mock
 
 from realestate_alert.building_ledger import BuildingTitle
 from realestate_alert.land_info import LandSummary
 from realestate_alert.models import Listing
-from realestate_alert.verify import enrich_listing, market_for_address, verify_address
+from realestate_alert.verify import (
+    _resolve_market_region,
+    enrich_listing,
+    market_for_address,
+    verify_address,
+)
 
 from tests.test_building_ledger import TITLE_XML
 from tests.test_land_info import _route_fetcher as land_fetcher
@@ -75,6 +81,43 @@ class MarketForAddressTests(unittest.TestCase):
         result = market_for_address("이상한 주소", fetcher=_combined_fetcher)
         self.assertIsNone(result["market"])
         self.assertIsNotNone(result["error"])
+
+
+def _vworld_code_fetcher(level4lc):
+    def fetch(url):
+        return json.dumps({"response": {"status": "OK",
+                          "refined": {"structure": {"level4LC": level4lc}}}})
+    return fetch
+
+
+class ResolveMarketRegionTests(unittest.TestCase):
+    """시군구 lawd_cd 해석 — 하드코딩 테이블 우선, 그 외 전국은 VWorld 보강."""
+
+    def setUp(self):
+        import realestate_alert.land_info as land_info
+        land_info._region_code_cache.clear()
+
+    def test_uses_table_without_external_call(self):
+        def boom(url):
+            raise AssertionError("테이블에 있으면 VWorld를 호출하면 안 된다")
+
+        lawd, dong = _resolve_market_region("서울 양천구 목동 917-9", boom)
+        self.assertEqual(lawd, "11470")
+        self.assertEqual(dong, "목동")
+
+    def test_falls_back_to_vworld_for_other_regions(self):
+        with mock.patch.dict("os.environ", {"VWORLD_API_KEY": "k"}, clear=False):
+            lawd, dong = _resolve_market_region(
+                "서울특별시 성북구 정릉동 508-123",
+                _vworld_code_fetcher("1129013300105080123"),
+            )
+        self.assertEqual(lawd, "11290")  # level4LC 앞 5자리
+        self.assertEqual(dong, "정릉동")
+
+    def test_returns_none_when_unresolvable(self):
+        with mock.patch.dict("os.environ", {"VWORLD_API_KEY": "k"}, clear=False):
+            lawd, _ = _resolve_market_region("부산 해운대구 우동 1", lambda url: "{}")
+        self.assertIsNone(lawd)
 
 
 class EnrichListingTests(unittest.TestCase):

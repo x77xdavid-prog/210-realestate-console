@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from realestate_alert.address import ParcelAddress, parse_parcel_address
+from realestate_alert.address import ParcelAddress, extract_dong, parse_parcel_address
 from realestate_alert.building_ledger import BuildingTitle, fetch_building_titles, primary_title
-from realestate_alert.land_info import LandSummary, fetch_land_summary
+from realestate_alert.land_info import LandSummary, fetch_land_summary, geocode_region_code
 from realestate_alert.market_price import MarketSummary, recent_deal_months, summarize_market
 from realestate_alert.models import Listing
 from realestate_alert.public_data import Fetcher, MissingApiKeyError, PublicDataError
@@ -71,16 +71,15 @@ def market_for_address(
     주소 파싱 실패·API 키 없음·조회 실패는 모두 흡수하고 ``error``에 사유를 남긴다.
     """
     result: dict[str, Any] = {"address": address, "market": None, "error": None}
-    try:
-        parcel = parse_parcel_address(address)
-    except ValueError as error:
-        result["error"] = str(error)
+    lawd_cd, dong = _resolve_market_region(address, fetcher)
+    if not lawd_cd:
+        result["error"] = f"지역 코드를 확인할 수 없습니다: {address}"
         return result
     try:
         market = summarize_market(
-            lawd_cd=parcel.sigungu_code,
+            lawd_cd=lawd_cd,
             months=recent_deal_months(market_months),
-            dong=parcel.dong,
+            dong=dong,
             fetcher=fetcher,
         )
     except (MissingApiKeyError, PublicDataError) as error:
@@ -88,6 +87,27 @@ def market_for_address(
         return result
     result["market"] = _market_to_dict(market)
     return result
+
+
+def _resolve_market_region(
+    address: str, fetcher: Fetcher | None
+) -> tuple[str | None, str | None]:
+    """주소 → (시군구 lawd_cd 5자리, 법정동명). 하드코딩 테이블 우선, 없으면 VWorld 보강.
+
+    테이블(관악/양천)은 외부호출 없이 빠르고, 그 외 전국은 VWorld 지오코더의
+    법정동코드(level4LC) 앞 5자리로 시군구 코드를 얻는다. dong은 시세 필터용 법정동명.
+    """
+    try:
+        parcel = parse_parcel_address(address)
+        return parcel.sigungu_code, parcel.dong
+    except ValueError:
+        pass
+    try:
+        code = geocode_region_code(address, fetcher=fetcher)
+    except (MissingApiKeyError, PublicDataError):
+        code = None
+    lawd_cd = code[:5] if code and len(code) >= 5 else None
+    return lawd_cd, extract_dong(address)
 
 
 def enrich_listing(
