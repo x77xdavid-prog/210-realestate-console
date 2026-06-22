@@ -237,6 +237,19 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 payload = build_detail_payload(_store(config_path), identity, cs_no, cort, seq,
                                                photo_dir=_photo_dir(config_path))
                 self._send_json(payload); return
+            if self.path.startswith("/api/listing/doc-link"):
+                q = parse_qs(urlparse(self.path).query)
+                cs_no = (q.get("cs") or [""])[0]
+                cort = (q.get("court") or [""])[0]
+                seq = (q.get("seq") or ["1"])[0]
+                kind = (q.get("kind") or ["sale_spec"])[0]
+                if not cs_no or not cort:
+                    self._send_json({"url": None, "error": "cs/court 필요"}, status=400)
+                    return
+                from realestate_alert.court_documents import sale_spec_viewer_url
+                url = sale_spec_viewer_url(cs_no, cort, seq) if kind == "sale_spec" else None
+                self._send_json({"url": url})
+                return
             if self.path.startswith("/api/photo"):
                 q = parse_qs(urlparse(self.path).query)
                 target = safe_photo_path(_photo_dir(config_path), (q.get("path") or [""])[0])

@@ -953,6 +953,47 @@ function initHospitalAnalysis(addr) {
   });
 }
 
+// ── 공식 문서 딥링크 (매각물건명세서) ──────────────────────────────────────────
+
+/**
+ * 매각물건명세서 링크: 클릭 시 서버가 courtauction에서 신선한 전자문서 뷰어
+ * 딥링크(encParam)를 만들어 새 탭으로 연다. encParam이 단기 토큰이라 클릭 시점에
+ * 생성한다. 팝업 차단을 피하려고 클릭 동기 시점에 빈 탭을 먼저 연다.
+ */
+function initDocLinks(params) {
+  const el = $("dp-doc-sale-spec");
+  if (!el) return;
+  // cs/court가 없으면(법원물건 아님) 기존 courtauction 안내 링크 유지
+  if (!params.cs || !params.court) return;
+
+  el.addEventListener("click", async (e) => {
+    e.preventDefault();
+    // noopener를 주면 window.open이 null을 반환해 빈 탭이 남으므로, 참조를 받고
+    // opener를 수동으로 끊는다(신뢰된 정부 도메인으로만 이동).
+    const win = window.open("", "_blank");
+    if (win) {
+      try { win.opener = null; } catch (_) { /* noop */ }
+      win.document.write(
+        "<!DOCTYPE html><meta charset='utf-8'><title>매각물건명세서</title>" +
+        "<p style='font-family:sans-serif;padding:24px;color:#3d5a73'>매각물건명세서를 불러오는 중…</p>"
+      );
+    }
+    const fallback = "https://www.courtauction.go.kr";
+    try {
+      const qs = new URLSearchParams({
+        cs: params.cs, court: params.court, seq: params.seq || "1", kind: "sale_spec",
+      }).toString();
+      const resp = await fetch(`/api/listing/doc-link?${qs}`);
+      const data = await resp.json().catch(() => ({}));
+      const target = data && data.url ? data.url : fallback;
+      if (win) win.location.href = target;
+      else window.open(target, "_blank", "noopener");
+    } catch (err) {
+      if (win) win.location.href = fallback;
+    }
+  });
+}
+
 // ── Tab nav ───────────────────────────────────────────────────────────────────
 
 function initTabNav() {
@@ -1025,6 +1066,7 @@ async function boot() {
   initLightbox();
 
   const params = getParams();
+  initDocLinks(params);
 
   if (!params.id) {
     showError("URL에 ?id= 파라미터가 없습니다", "목록 페이지에서 물건을 선택해 주세요.");
