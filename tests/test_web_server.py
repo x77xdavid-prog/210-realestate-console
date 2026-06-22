@@ -654,6 +654,8 @@ class PhotoPathTests(unittest.TestCase):
         base = Path("/data/photos")
         self.assertIsNone(safe_photo_path(base, "../secret.txt"))
         self.assertIsNone(safe_photo_path(base, "/etc/passwd"))
+        self.assertIsNone(safe_photo_path(base, "..\\secret.txt"))   # Windows backslash traversal
+        self.assertIsNone(safe_photo_path(base, ""))                 # empty rejected
         ok = safe_photo_path(base, "court_x-1/01.jpg")
         self.assertTrue(str(ok).replace("\\", "/").endswith("court_x-1/01.jpg"))
 
