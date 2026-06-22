@@ -4,7 +4,7 @@ from unittest import mock
 from realestate_alert.building_ledger import BuildingTitle
 from realestate_alert.land_info import LandSummary
 from realestate_alert.models import Listing
-from realestate_alert.verify import enrich_listing, verify_address
+from realestate_alert.verify import enrich_listing, market_for_address, verify_address
 
 from tests.test_building_ledger import TITLE_XML
 from tests.test_land_info import _route_fetcher as land_fetcher
@@ -47,6 +47,34 @@ class VerifyAddressTests(unittest.TestCase):
         report = verify_address("이상한 주소", fetcher=_combined_fetcher)
         self.assertIn("address", report["errors"])
         self.assertIsNone(report["parcel"])
+
+
+class MarketForAddressTests(unittest.TestCase):
+    """경량 시세 전용 헬퍼 — verify의 3중 호출 없이 실거래만 조회한다."""
+
+    def test_returns_market_summary_only(self):
+        env = {"DATA_GO_KR_API_KEY": "k1"}
+        with mock.patch.dict("os.environ", env, clear=False):
+            result = market_for_address(
+                "서울 양천구 목동 917-9", market_months=1, fetcher=_combined_fetcher
+            )
+        self.assertIsNotNone(result["market"])
+        self.assertEqual(result["market"]["trade_count"], 1)
+        self.assertIn("recent_trades", result["market"])
+        self.assertIsNone(result["error"])
+
+    def test_missing_key_reports_error_and_absorbs(self):
+        with mock.patch.dict("os.environ", {}, clear=True):
+            result = market_for_address(
+                "서울 양천구 목동 917-9", market_months=1, fetcher=_combined_fetcher
+            )
+        self.assertIsNone(result["market"])
+        self.assertIn("DATA_GO_KR_API_KEY", result["error"])
+
+    def test_unparseable_address_returns_error(self):
+        result = market_for_address("이상한 주소", fetcher=_combined_fetcher)
+        self.assertIsNone(result["market"])
+        self.assertIsNotNone(result["error"])
 
 
 class EnrichListingTests(unittest.TestCase):

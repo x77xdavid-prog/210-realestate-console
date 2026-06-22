@@ -324,6 +324,122 @@ function renderPriceCards(d) {
   });
 }
 
+// ── 실거래 시세 (시세분석 섹션) ──────────────────────────────────────────────
+
+/**
+ * POST /api/market 로 실거래 시세만 가볍게 조회 (건축물대장/토지 호출 없음).
+ * @param {string} address 지번주소
+ * @returns {Promise<object>}  { address, market, error }
+ */
+async function fetchMarket(address) {
+  const resp = await fetch("/api/market", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ address, months: 6 }),
+  });
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => "");
+    throw new Error(`HTTP ${resp.status}: ${txt || resp.statusText}`);
+  }
+  return resp.json();
+}
+
+/** 시세분석 섹션에 실거래 시세(요약 + 최근 거래표) 렌더 */
+function renderMarket(result) {
+  const body = $("dp-market-body");
+  if (!body) return;
+  body.innerHTML = "";
+
+  const market = result && result.market;
+  if (!market) {
+    const msg = document.createElement("div");
+    msg.className = "dp-market-empty";
+    msg.textContent =
+      result && result.error
+        ? "실거래 시세를 불러오지 못했습니다."
+        : "주변 실거래 내역이 없습니다.";
+    body.appendChild(msg);
+    return;
+  }
+
+  // 요약 stat 카드
+  const stats = document.createElement("div");
+  stats.className = "dp-market-stats";
+  const months = Array.isArray(market.months) ? market.months.length : null;
+  const statRows = [
+    ["평균 ㎡당가", market.avg_price_per_m2 != null ? won(market.avg_price_per_m2) : "—"],
+    ["최저 ㎡당가", market.min_price_per_m2 != null ? won(market.min_price_per_m2) : "—"],
+    ["최고 ㎡당가", market.max_price_per_m2 != null ? won(market.max_price_per_m2) : "—"],
+    ["거래 건수", (market.trade_count != null ? market.trade_count : 0) + "건"],
+    ["조회 기간", months != null ? `최근 ${months}개월` : "—"],
+  ];
+  statRows.forEach(([label, val]) => {
+    const card = document.createElement("div");
+    card.className = "dp-market-stat";
+    card.innerHTML =
+      `<div class="dp-market-stat-val">${escapeHtml(val)}</div>` +
+      `<div class="dp-market-stat-label">${escapeHtml(label)}</div>`;
+    stats.appendChild(card);
+  });
+  body.appendChild(stats);
+
+  // 최근 실거래 테이블
+  const trades = Array.isArray(market.recent_trades) ? market.recent_trades : [];
+  if (trades.length === 0) {
+    const none = document.createElement("div");
+    none.className = "dp-market-empty";
+    none.textContent = "표시할 최근 거래가 없습니다.";
+    body.appendChild(none);
+    return;
+  }
+
+  const tableWrap = document.createElement("div");
+  tableWrap.style.overflowX = "auto";
+  const table = document.createElement("table");
+  table.className = "dp-market-table";
+  table.innerHTML =
+    "<thead><tr><th>거래일</th><th>동</th><th>용도</th><th>거래가</th><th>전용면적</th><th>㎡당가</th></tr></thead>";
+  const tbody = document.createElement("tbody");
+  trades.forEach((t) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td>${escapeHtml(t.deal_date || "—")}</td>` +
+      `<td>${escapeHtml(t.dong || "—")}</td>` +
+      `<td>${escapeHtml(t.building_use || "—")}</td>` +
+      `<td>${escapeHtml(won(t.deal_amount_won))}</td>` +
+      `<td>${escapeHtml(t.building_area_m2 != null ? pyeong(t.building_area_m2) : "—")}</td>` +
+      `<td>${escapeHtml(t.price_per_building_m2 != null ? won(t.price_per_building_m2) : "—")}</td>`;
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  tableWrap.appendChild(table);
+  body.appendChild(tableWrap);
+}
+
+/** 시세 비동기 로드 (논블로킹: 본문 렌더를 막지 않는다) */
+async function loadMarket(address) {
+  const body = $("dp-market-body");
+  if (!address) {
+    if (body) {
+      body.innerHTML =
+        '<div class="dp-market-empty">주소 정보가 없어 시세를 조회할 수 없습니다.</div>';
+    }
+    return;
+  }
+  try {
+    const result = await fetchMarket(address);
+    renderMarket(result);
+  } catch (err) {
+    if (body) {
+      body.innerHTML = "";
+      const msg = document.createElement("div");
+      msg.className = "dp-market-empty";
+      msg.textContent = "실거래 시세를 불러오지 못했습니다.";
+      body.appendChild(msg);
+    }
+  }
+}
+
 /** 권리분석 인수사항 */
 function renderRights(incumbrances) {
   const wrap = $("dp-rights-content");
@@ -793,6 +909,9 @@ async function boot() {
     renderAll(data);
     initHospitalAnalysis(data.addr_jibun || data.addr_road || "");
     elBody.hidden = false;
+
+    // 실거래 시세는 본문 표시 후 비동기로 채운다 (외부 API 지연이 페이지를 막지 않도록).
+    loadMarket(data.addr_jibun || data.addr_road || "");
   } catch (err) {
     showError(
       "데이터를 불러올 수 없습니다",

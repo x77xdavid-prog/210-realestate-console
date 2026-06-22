@@ -43,7 +43,7 @@ from realestate_alert.filtering import matches_listing
 from realestate_alert.hospital_fit import classify as classify_hospital_fit
 from realestate_alert.service import ListingSnapshot, collect_listings, run_once
 from realestate_alert.store import LEDGER_STATUSES, ListingStore
-from realestate_alert.verify import verify_address
+from realestate_alert.verify import market_for_address, verify_address
 
 MAX_BODY_BYTES = 256 * 1024
 
@@ -408,6 +408,17 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 if not isinstance(months, int) or not (1 <= months <= 12):
                     months = 6
                 self._send_json(verify_address(address, market_months=months))
+                return
+            if self.path == "/api/market":
+                body = self._read_json_body()
+                address = str(body.get("address", "")).strip()
+                if not address:
+                    self._send_json({"error": "address가 필요합니다."}, status=400)
+                    return
+                months = body.get("months", 6)
+                if not isinstance(months, int) or not (1 <= months <= 12):
+                    months = 6
+                self._send_json(market_for_address(address, market_months=months))
                 return
             if self.path == "/api/ledger/delete":
                 body = self._read_json_body()
