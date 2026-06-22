@@ -83,7 +83,9 @@ def _parcel_from_district(
     district: dict[str, str], address: str
 ) -> ParcelAddress | None:
     code = str(district.get("code") or "")
-    if not code.isdigit() or len(code) < 19:
+    # PNU는 정확히 19자리(시군구5+법정동5+필지구분1+본번4+부번4). 그 외는 거부
+    # (20자리 이상을 자르면 잘못된 본번/부번으로 엉뚱한 필지를 조회하게 됨).
+    if not code.isdigit() or len(code) != 19:
         return None
     return ParcelAddress(
         sigungu=district.get("sigungu") or "",

@@ -158,6 +158,20 @@ class ResolveParcelTests(unittest.TestCase):
             parcel = resolve_parcel("서울특별시 성북구 정릉동", _vworld_code_fetcher("11290"))
         self.assertIsNone(parcel)
 
+    def test_mountain_parcel_decomposed(self):
+        # 필지구분(11번째 자리)=2 → 산
+        with mock.patch.dict("os.environ", {"VWORLD_API_KEY": "k"}, clear=False):
+            parcel = resolve_parcel("강원특별자치도 어딘가 산1", _vworld_code_fetcher("5113025025200010000"))
+        self.assertTrue(parcel.mountain)
+        self.assertEqual(parcel.plat_gb_cd, "1")  # 산=1
+        self.assertEqual(parcel.bun, 1)
+        self.assertEqual(parcel.pnu, "5113025025200010000")
+
+    def test_twenty_digit_code_rejected(self):
+        with mock.patch.dict("os.environ", {"VWORLD_API_KEY": "k"}, clear=False):
+            parcel = resolve_parcel("아무데나 1", _vworld_code_fetcher("11290133001050801234"))
+        self.assertIsNone(parcel)  # 19자리 정확 일치만 허용
+
 
 class EnrichListingTests(unittest.TestCase):
     def test_fills_only_missing_fields(self):
