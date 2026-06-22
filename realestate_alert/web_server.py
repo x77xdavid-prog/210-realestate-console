@@ -67,6 +67,41 @@ _collecting: set[str] = set()
 # 수집 진행 상황 — 대시보드가 "수집 갯수 올라가는" 연출을 보여주기 위해 폴링해 읽는다.
 _collect_progress: dict[str, dict[str, Any]] = {}
 
+# 외부(courtauction/data.go.kr) 직접 호출 엔드포인트(시세·문서딥링크·임차인)용 보호.
+# 같은 물건 반복 조회를 짧게 캐시하고, 동시 라이브 호출 수를 제한해 스레드 고갈을 막는다.
+_ext_cache: dict[str, tuple[float, Any]] = {}
+_ext_cache_lock = threading.Lock()
+_ext_fetch_sema = threading.Semaphore(4)
+_EXT_CACHE_TTL = 300.0
+_EXT_BUSY_WAIT = 3.0
+
+
+def _ext_fetch(cache_key: str, producer, is_valid) -> Any:
+    """외부 라이브 호출 결과를 짧게 캐시하고 동시 호출 수를 제한한다.
+
+    캐시 적중 시 즉시 반환. 동시 호출 한도 초과(대기 타임아웃) 시 None(busy)을 돌려
+    호출부가 graceful 폴백 응답을 보내게 한다. 성공해 보이는 결과만 캐시한다.
+    """
+    now = time.monotonic()
+    with _ext_cache_lock:
+        hit = _ext_cache.get(cache_key)
+        if hit and now - hit[0] < _EXT_CACHE_TTL:
+            return hit[1]
+    if not _ext_fetch_sema.acquire(timeout=_EXT_BUSY_WAIT):
+        return None
+    try:
+        with _ext_cache_lock:
+            hit = _ext_cache.get(cache_key)
+            if hit and time.monotonic() - hit[0] < _EXT_CACHE_TTL:
+                return hit[1]
+        value = producer()
+    finally:
+        _ext_fetch_sema.release()
+    if is_valid(value):
+        with _ext_cache_lock:
+            _ext_cache[cache_key] = (time.monotonic(), value)
+    return value
+
 
 def _empty_snapshot() -> ListingSnapshot:
     return ListingSnapshot(fetched=[], matched=[])
@@ -247,7 +282,11 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                     self._send_json({"url": None, "error": "cs/court 필요"}, status=400)
                     return
                 from realestate_alert.court_documents import sale_spec_viewer_url
-                url = sale_spec_viewer_url(cs_no, cort, seq) if kind == "sale_spec" else None
+                url = _ext_fetch(
+                    f"doc:{kind}:{cort}:{cs_no}:{seq}",
+                    lambda: sale_spec_viewer_url(cs_no, cort, seq) if kind == "sale_spec" else None,
+                    lambda u: bool(u),
+                )
                 self._send_json({"url": url})
                 return
             if self.path.startswith("/api/listing/tenants"):
@@ -259,7 +298,15 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                                      "error": "cs/court 필요"}, status=400)
                     return
                 from realestate_alert.court_curst import fetch_tenants
-                self._send_json(fetch_tenants(cs_no, cort))
+                result = _ext_fetch(
+                    f"tenants:{cort}:{cs_no}",
+                    lambda: fetch_tenants(cs_no, cort),
+                    lambda r: bool(r) and (r.get("tenants") or (r.get("survey") or {}).get("sent_date")),
+                )
+                if result is None:
+                    result = {"tenants": [], "occupancy": [], "survey": {},
+                              "error": "현황조사서 조회가 혼잡합니다. 잠시 후 다시 시도하세요."}
+                self._send_json(result)
                 return
             if self.path.startswith("/api/photo"):
                 q = parse_qs(urlparse(self.path).query)
@@ -442,7 +489,15 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 months = body.get("months", 6)
                 if not isinstance(months, int) or not (1 <= months <= 12):
                     months = 6
-                self._send_json(market_for_address(address, market_months=months))
+                result = _ext_fetch(
+                    f"market:{address}:{months}",
+                    lambda: market_for_address(address, market_months=months),
+                    lambda r: bool(r) and r.get("market") is not None,
+                )
+                if result is None:
+                    result = {"address": address, "market": None,
+                              "error": "시세 조회가 혼잡합니다. 잠시 후 다시 시도하세요."}
+                self._send_json(result)
                 return
             if self.path == "/api/ledger/delete":
                 body = self._read_json_body()

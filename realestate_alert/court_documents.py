@@ -101,7 +101,8 @@ def sale_spec_viewer_url(
         if not enc or not url:
             return None
         return build_viewer_url(url, enc)
-    except Exception:  # noqa: BLE001 — 외부 호출 실패는 전부 흡수
+    except Exception as exc:  # noqa: BLE001 — 외부 호출 실패는 전부 흡수
+        print(f"[court-doc] 매각물건명세서 딥링크 실패 ({cort_ofc_cd} {cs_no}): {exc}")
         return None
 
 

@@ -29,8 +29,6 @@ TIMEOUT = 20
 
 CurstFetcher = Callable[[dict[str, Any]], str]
 
-EMPTY: dict[str, Any] = {"tenants": (), "occupancy": (), "survey": {}}
-
 
 def build_curst_body(cs_no: str, cort_ofc_cd: str) -> dict[str, Any]:
     return {
@@ -100,7 +98,8 @@ def fetch_tenants(
     try:
         raw = (fetcher or _live_curst)(body)
         payload = json.loads(raw)
-    except Exception:  # noqa: BLE001 — 외부 호출·파싱 실패 흡수
+    except Exception as exc:  # noqa: BLE001 — 외부 호출·파싱 실패 흡수
+        print(f"[court-curst] 현황조사서 조회 실패 ({cort_ofc_cd} {cs_no}): {exc}")
         return {"tenants": [], "occupancy": [], "survey": {}}
     return parse_curst(payload)
 

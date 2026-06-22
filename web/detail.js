@@ -979,7 +979,10 @@ function renderMarketGroup(market, errors) {
 
   if (market.avg_price_per_m2 != null) addRow("평균 ㎡당가", won(market.avg_price_per_m2) + "/㎡");
   if (market.trade_count != null) addRow("거래 건수", `${market.trade_count}건`);
-  if (market.months != null) addRow("조회 기간", `최근 ${market.months}개월`);
+  if (market.months != null) {
+    const monthCount = Array.isArray(market.months) ? market.months.length : market.months;
+    addRow("조회 기간", `최근 ${monthCount}개월`);
+  }
 
   div.appendChild(kv);
   return div;
