@@ -1005,6 +1005,29 @@ def _listings_payload(config_path: Path) -> dict[str, Any]:
     }
 
 
+def _card_extras(listing: Listing) -> dict[str, Any]:
+    """카드 UI에 필요한 추가 필드를 반환한다. _listing_to_dict에 병합된다."""
+    thumbnail_url = (
+        f"/api/photo?path={listing.thumbnail_path}" if listing.thumbnail_path else None
+    )
+    detail_link = (
+        {
+            "id": listing.identity,
+            "cs": listing.cs_no,
+            "court": listing.cort_ofc_cd,
+            "seq": listing.gds_seq,
+        }
+        if listing.source == "court" and listing.cs_no
+        else None
+    )
+    return {
+        "thumbnail_url": thumbnail_url,
+        "photo_count": listing.photo_count,
+        "incumbrance_tags": list(listing.incumbrance_tags),
+        "detail_link": detail_link,
+    }
+
+
 def _listing_to_dict(
     listing: Listing,
     is_new: bool = False,
@@ -1059,4 +1082,5 @@ def _listing_to_dict(
         "registry_status": RegistryStatus.NEEDS_CHECK.value,
         "registry_risks": [],
         "registryText": "",
+        **_card_extras(listing),
     }
