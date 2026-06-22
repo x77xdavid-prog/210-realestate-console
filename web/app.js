@@ -3604,8 +3604,18 @@ async function openCourtDetail(link, listing) {
     scrim.className = "cdt-scrim";
     scrim.innerHTML = `<div class="cdt-modal" id="cdtModal"><div class="cdt-loading">불러오는 중…</div></div>`;
     document.body.appendChild(scrim);
+    // 이벤트 위임 — app.js는 ES module이라 인라인 onclick("closeCdtDetail()")이
+    // 전역에서 안 보임. 닫기(×)·썸네일 전환·백드롭을 모두 여기서 처리한다.
     scrim.addEventListener("click", (e) => {
-      if (e.target === scrim) closeCdtDetail();
+      if (e.target === scrim || e.target.closest(".cdt-x")) {
+        closeCdtDetail();
+        return;
+      }
+      const thumb = e.target.closest("[data-i]");
+      if (thumb && thumb.dataset.i != null) cdtPick(Number(thumb.dataset.i));
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && scrim.classList.contains("cdt-show")) closeCdtDetail();
     });
   }
 
@@ -3619,7 +3629,7 @@ async function openCourtDetail(link, listing) {
     d = await apiJson(url);
   } catch (err) {
     document.getElementById("cdtModal").innerHTML =
-      `<div class="cdt-mhd"><span>오류</span><button class="cdt-x" onclick="closeCdtDetail()">×</button></div>` +
+      `<div class="cdt-mhd"><span>오류</span><button class="cdt-x" type="button" aria-label="닫기">×</button></div>` +
       `<div style="padding:32px;color:var(--rose)">상세 정보를 불러오지 못했습니다.<br>${escapeHtml(String(err))}</div>`;
     return;
   }
@@ -3634,7 +3644,7 @@ async function openCourtDetail(link, listing) {
     const thumbs = photos
       .map(
         (p, i) =>
-          `<img src="/api/photo?path=${encodeURIComponent(p.file)}" data-i="${i}" data-file="${escapeHtml(p.file)}" class="${i === 0 ? "cdt-ton" : ""}" onclick="cdtPick(${i})" alt="사진 ${i + 1}">`,
+          `<img src="/api/photo?path=${encodeURIComponent(p.file)}" data-i="${i}" data-file="${escapeHtml(p.file)}" class="${i === 0 ? "cdt-ton" : ""}" alt="사진 ${i + 1}">`,
       )
       .join("");
     galleryHtml = `<div class="cdt-gal">
@@ -3721,7 +3731,7 @@ async function openCourtDetail(link, listing) {
         <div class="cdt-ct">${escapeHtml(d.court || "")} ${escapeHtml(d.dept || "")} · ${escapeHtml(d.case_no || "")} · ${escapeHtml(d.auction_type || "")}</div>
         <h2 class="cdt-addr">${escapeHtml(d.addr_road || d.addr_jibun || "")}</h2>
       </div>
-      <button class="cdt-x" onclick="closeCdtDetail()">×</button>
+      <button class="cdt-x" type="button" aria-label="닫기">×</button>
     </div>
     <div class="cdt-mbody">
       <div class="cdt-two">
