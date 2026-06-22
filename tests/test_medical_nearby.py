@@ -16,8 +16,9 @@ HOSPITAL_XML = """<?xml version="1.0" encoding="UTF-8"?>
     <items>
       <item><yadmNm>목동튼튼정형외과의원</yadmNm><clCdNm>의원</clCdNm></item>
       <item><yadmNm>바른정형외과의원</yadmNm><clCdNm>의원</clCdNm></item>
+      <item><yadmNm>연세바른의원</yadmNm><clCdNm>의원</clCdNm></item>
     </items>
-    <numOfRows>50</numOfRows><pageNo>1</pageNo><totalCount>4</totalCount>
+    <numOfRows>100</numOfRows><pageNo>1</pageNo><totalCount>4</totalCount>
   </body>
 </response>
 """
@@ -58,14 +59,18 @@ def _pharmacy_denied_fetcher(url: str) -> str:
 class MedicalNearbyTests(unittest.TestCase):
     def test_fetch_counts_and_names(self):
         result = fetch_medical_nearby("목동", service_key="test-key", fetcher=_fake_fetcher)
-        self.assertEqual(result.ortho_clinic_count, 4)  # totalCount 우선
+        # 이름에 '정형외과'가 든 전문의원만 직접 경쟁으로 센다 (연세바른의원 제외)
+        self.assertEqual(result.ortho_clinic_count, 2)
         self.assertEqual(result.ortho_clinic_names, ("목동튼튼정형외과의원", "바른정형외과의원"))
+        # 정형외과 진료과목 의원 전체는 totalCount(4)로 따로 보존
+        self.assertEqual(result.ortho_treating_count, 4)
         self.assertEqual(result.pharmacy_count, 7)
 
     def test_partial_success_when_pharmacy_denied(self):
         # 병원 API만 승인된 상태 — 병원 데이터는 살리고 약국만 None
         result = fetch_medical_nearby("목동", service_key="test-key", fetcher=_pharmacy_denied_fetcher)
-        self.assertEqual(result.ortho_clinic_count, 4)
+        self.assertEqual(result.ortho_clinic_count, 2)
+        self.assertEqual(result.ortho_treating_count, 4)
         self.assertIsNone(result.pharmacy_count)
 
     def test_error_raises_when_all_sources_fail(self):
@@ -75,13 +80,15 @@ class MedicalNearbyTests(unittest.TestCase):
     def test_medical_to_dict(self):
         summary = MedicalNearby(
             ortho_clinic_count=2,
-            ortho_clinic_names=("a의원",),
+            ortho_clinic_names=("a정형외과의원",),
             pharmacy_count=0,
+            ortho_treating_count=9,
         )
         payload = medical_to_dict(summary)
         self.assertEqual(payload["ortho_clinic_count"], 2)
-        self.assertEqual(payload["ortho_clinic_names"], ["a의원"])
+        self.assertEqual(payload["ortho_clinic_names"], ["a정형외과의원"])
         self.assertEqual(payload["pharmacy_count"], 0)
+        self.assertEqual(payload["ortho_treating_count"], 9)
 
 
 if __name__ == "__main__":

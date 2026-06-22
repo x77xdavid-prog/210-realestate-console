@@ -9,6 +9,9 @@ BJDONG_CODES: dict[tuple[str, str], tuple[str, str]] = {
     ("양천구", "목동"): ("11470", "10100"),
     ("양천구", "신정동"): ("11470", "10200"),
     ("양천구", "신월동"): ("11470", "10300"),
+    ("관악구", "봉천동"): ("11620", "10100"),
+    ("관악구", "신림동"): ("11620", "10200"),
+    ("관악구", "남현동"): ("11620", "10300"),
 }
 
 _ADDRESS_PATTERN = re.compile(
@@ -52,6 +55,20 @@ class ParcelAddress:
     def plat_gb_cd(self) -> str:
         """건축물대장 대지구분코드: 0=대지, 1=산."""
         return "1" if self.mountain else "0"
+
+
+def extract_dong(address: str) -> str | None:
+    """주소 문자열에서 법정동(읍/면/동/가) 이름만 추출한다.
+
+    법정동코드 미등록 지역이어도 심평원(emdongNm 기반) 의원·약국 조회에 쓸 수 있도록
+    코드 테이블 없이 동작한다. 번지가 없어도 동 이름까지만 있으면 인식한다.
+    """
+    text = address.strip()
+    match = _ADDRESS_PATTERN.search(text)
+    if match:
+        return match.group("dong")
+    loose = re.search(r"(?P<dong>\S+(?:동|가))", text)
+    return loose.group("dong") if loose else None
 
 
 def parse_parcel_address(address: str) -> ParcelAddress:

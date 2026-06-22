@@ -1,6 +1,21 @@
 import unittest
 
-from realestate_alert.address import parse_parcel_address
+from realestate_alert.address import extract_dong, parse_parcel_address
+
+
+class ExtractDongTests(unittest.TestCase):
+    def test_extracts_dong_from_unregistered_district(self):
+        # 법정동코드 미등록 지역(송파구 삼전동)이라도 동 이름은 뽑힌다 (심평원 조회용)
+        self.assertEqual(extract_dong("서울특별시 송파구 삼전동 100-1"), "삼전동")
+
+    def test_extracts_dong_without_bun(self):
+        self.assertEqual(extract_dong("서울 관악구 신림동"), "신림동")
+
+    def test_extracts_ga_suffix(self):
+        self.assertEqual(extract_dong("서울 중구 을지로3가 100"), "을지로3가")
+
+    def test_returns_none_when_no_dong(self):
+        self.assertIsNone(extract_dong("주소 없음"))
 
 
 class AddressTests(unittest.TestCase):

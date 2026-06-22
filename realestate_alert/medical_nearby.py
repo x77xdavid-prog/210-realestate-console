@@ -23,14 +23,18 @@ PHARMACY_LIST_URL = "https://apis.data.go.kr/B551182/pharmacyInfoService/getParm
 
 ORTHOPEDICS_SUBJECT_CODE = "05"  # 심평원 진료과목 코드: 정형외과
 CLINIC_CLASS_CODE = "31"  # 종별 코드: 의원
-MAX_ROWS = "50"
+MAX_ROWS = "100"
+ORTHO_NAME_HINT = "정형외과"
 
 
 @dataclass(frozen=True)
 class MedicalNearby:
+    # 같은 법정동 기준. ortho_clinic_count는 이름에 '정형외과'가 든 전문의원 수(직접 경쟁),
+    # ortho_treating_count는 정형외과 진료과목(dgsbjtCd=05)을 두는 의원 수(넓은 경쟁).
     ortho_clinic_count: int | None
     ortho_clinic_names: tuple[str, ...]
     pharmacy_count: int | None
+    ortho_treating_count: int | None = None
 
 
 def fetch_medical_nearby(
@@ -46,7 +50,8 @@ def fetch_medical_nearby(
     key = service_key or data_go_kr_key()
     get = fetcher or xml_fetcher
 
-    ortho_count: int | None = None
+    ortho_specialty_count: int | None = None
+    ortho_treating_count: int | None = None
     ortho_names: tuple[str, ...] = ()
     pharmacy_count: int | None = None
     errors: list[str] = []
@@ -63,7 +68,12 @@ def fetch_medical_nearby(
         },
     )
     try:
-        ortho_count, ortho_names = _count_and_names(get(hospital_url))
+        # dgsbjtCd=05는 '정형외과 진료를 보는 의원'을 모두 돌려준다(예: 신림동 50곳).
+        # 그중 직접 경쟁인 정형외과 전문의원은 이름으로 추려 별도로 센다(예: 17곳).
+        ortho_treating_count, all_names = _count_and_names(get(hospital_url))
+        specialty = tuple(name for name in all_names if ORTHO_NAME_HINT in name)
+        ortho_specialty_count = len(specialty)
+        ortho_names = specialty
     except PublicDataError as error:
         errors.append(f"병원정보: {error}")
 
@@ -81,13 +91,14 @@ def fetch_medical_nearby(
     except PublicDataError as error:
         errors.append(f"약국정보: {error}")
 
-    if ortho_count is None and pharmacy_count is None:
+    if ortho_specialty_count is None and pharmacy_count is None:
         raise PublicDataError(" / ".join(errors) or "심평원 의료기관 조회 실패")
 
     return MedicalNearby(
-        ortho_clinic_count=ortho_count,
+        ortho_clinic_count=ortho_specialty_count,
         ortho_clinic_names=ortho_names,
         pharmacy_count=pharmacy_count,
+        ortho_treating_count=ortho_treating_count,
     )
 
 
@@ -96,6 +107,7 @@ def medical_to_dict(summary: MedicalNearby) -> dict:
         "ortho_clinic_count": summary.ortho_clinic_count,
         "ortho_clinic_names": list(summary.ortho_clinic_names),
         "pharmacy_count": summary.pharmacy_count,
+        "ortho_treating_count": summary.ortho_treating_count,
     }
 
 
