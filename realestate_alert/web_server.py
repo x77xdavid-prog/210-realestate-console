@@ -226,6 +226,17 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
             if self.path == "/api/listings":
                 self._send_json(_listings_payload(config_path))
                 return
+            if self.path.startswith("/api/listing/detail"):
+                q = parse_qs(urlparse(self.path).query)
+                identity = (q.get("id") or [""])[0]
+                cs_no = (q.get("cs") or [""])[0]
+                cort = (q.get("court") or [""])[0]
+                seq = (q.get("seq") or ["1"])[0]
+                if not identity:
+                    self._send_json({"error": "id 필요"}, status=400); return
+                payload = build_detail_payload(_store(config_path), identity, cs_no, cort, seq,
+                                               photo_dir=_photo_dir(config_path))
+                self._send_json(payload); return
             if self.path == "/api/diagnostics":
                 self._send_json(_diagnostics_payload(config_path))
                 return
@@ -779,6 +790,28 @@ def serve(config_path: Path, web_root: Path, host: str = "127.0.0.1", port: int 
         server.serve_forever()
     finally:
         server.server_close()
+
+
+def build_detail_payload(store, identity, cs_no, cort_ofc_cd, gds_seq, photo_dir, fetcher=None):
+    from realestate_alert.court_auction_detail import fetch_detail, parse_detail
+    from realestate_alert.photos import save_photos
+    from dataclasses import asdict
+    cached = store.get_detail(identity)
+    if cached:
+        return cached
+    payload = fetch_detail(cs_no, cort_ofc_cd, gds_seq, fetcher=fetcher)
+    pics = (((payload.get("data") or {}).get("dma_result") or {}).get("csPicLst")) or []
+    photo_paths = save_photos(pics, identity, photo_dir)
+    detail = parse_detail(payload, identity, photo_paths)
+    data = asdict(detail)
+    store.upsert_detail(identity, data)
+    return data
+
+
+def _photo_dir(config_path: Path) -> Path:
+    d = config_path.parent / "data" / "photos"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def _store(config_path: Path) -> ListingStore:

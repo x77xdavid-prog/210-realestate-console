@@ -592,6 +592,20 @@ class ChecklistApiTests(unittest.TestCase):
         self.assertTrue(response["listings"][0]["first_seen_at"])
 
 
+class DetailPayloadTests(unittest.TestCase):
+    def test_detail_payload_uses_cache(self):
+        import tempfile
+        from pathlib import Path
+        from realestate_alert.web_server import build_detail_payload
+        from realestate_alert.store import ListingStore
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ListingStore(Path(tmp) / "t.db"); store.initialize()
+            store.upsert_detail("court:x-1", {"case_no": "2024타경1", "photos": []})
+            payload = build_detail_payload(store, "court:x-1", "2024타경1", "B000210", "1",
+                                           photo_dir=Path(tmp), fetcher=lambda b: (_ for _ in ()).throw(AssertionError("should not fetch")))
+            self.assertEqual(payload["case_no"], "2024타경1")
+
+
 class DashboardAuthTests(unittest.TestCase):
     def test_password_protects_api_and_static(self):
         with tempfile.TemporaryDirectory() as temp_dir:
