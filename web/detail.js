@@ -216,22 +216,36 @@ function closeLightbox() {
   $("dp-lightbox-img").src = "";
 }
 
-/** Map: OpenStreetMap iframe or placeholder */
-function renderMap(lat, lng) {
+/**
+ * WGS84 한국 bbox 유효성 검사
+ * 위도 33~39, 경도 124~132 범위만 유효한 좌표로 간주
+ * @param {*} lat
+ * @param {*} lng
+ * @returns {boolean}
+ */
+function isValidKoreaCoord(lat, lng) {
+  const la = Number(lat);
+  const lo = Number(lng);
+  return (
+    !isNaN(la) && !isNaN(lo) &&
+    la >= 33 && la <= 39 &&
+    lo >= 124 && lo <= 132
+  );
+}
+
+/** Map: OpenStreetMap iframe (좌표 유효 시) 또는 외부 지도 링크 버튼 */
+function renderMap(lat, lng, addr) {
   const wrap = $("dp-map-wrap");
   wrap.innerHTML = "";
 
-  if (lat && lng) {
-    const bbox = 0.003;
-    const left = Number(lng) - bbox;
-    const bottom = Number(lat) - bbox;
-    const right = Number(lng) + bbox;
-    const top = Number(lat) + bbox;
+  if (isValidKoreaCoord(lat, lng)) {
+    const la = Number(lat);
+    const lo = Number(lng);
     const src =
       `https://www.openstreetmap.org/export/embed.html` +
-      `?bbox=${left}%2C${bottom}%2C${right}%2C${top}` +
+      `?bbox=${lo - 0.004}%2C${la - 0.003}%2C${lo + 0.004}%2C${la + 0.003}` +
       `&layer=mapnik` +
-      `&marker=${lat}%2C${lng}`;
+      `&marker=${la}%2C${lo}`;
     const iframe = document.createElement("iframe");
     iframe.className = "dp-map-iframe";
     iframe.src = src;
@@ -240,9 +254,22 @@ function renderMap(lat, lng) {
     iframe.setAttribute("allowfullscreen", "");
     wrap.appendChild(iframe);
   } else {
+    // 유효하지 않은 좌표 — 외부 지도 검색 링크 제공
+    const searchAddr = (addr || "").trim();
     const ph = document.createElement("div");
     ph.className = "dp-map-placeholder";
-    ph.textContent = "위치 정보 없음";
+
+    if (searchAddr) {
+      ph.innerHTML =
+        `<div style="margin-bottom:8px;color:var(--ink-faint);font-size:.85rem;">좌표 정보를 사용할 수 없어 외부 지도로 검색합니다.</div>` +
+        `<div class="dp-map-links">` +
+          `<a class="dp-map-link" href="https://map.kakao.com/?q=${encodeURIComponent(searchAddr)}" target="_blank" rel="noopener noreferrer">카카오맵에서 보기</a>` +
+          `<a class="dp-map-link" href="https://map.naver.com/v5/search/${encodeURIComponent(searchAddr)}" target="_blank" rel="noopener noreferrer">네이버지도에서 보기</a>` +
+        `</div>`;
+    } else {
+      ph.textContent = "위치 정보 없음";
+    }
+
     wrap.appendChild(ph);
   }
 }
@@ -460,6 +487,220 @@ function renderSaleNotice(notice) {
   $("dp-notice-text").textContent = notice;
 }
 
+// ── 병원 분석 (심평원·공공데이터 검증) ─────────────────────────────────────────
+
+/**
+ * POST /api/verify 를 호출해 심평원 의료 데이터 + 공공 검증 데이터를 받아온다.
+ * Request shape: { "address": "<지번주소>", "months": 6 }
+ * @param {string} address
+ * @returns {Promise<object>}
+ */
+async function fetchVerify(address) {
+  const resp = await fetch("/api/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ address, months: 6 }),
+  });
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => "");
+    throw new Error(`HTTP ${resp.status}: ${txt || resp.statusText}`);
+  }
+  return resp.json();
+}
+
+/** 심평원 의료 데이터 그룹 렌더링 */
+function renderMedicalGroup(medical, errors) {
+  const div = document.createElement("div");
+  div.className = "dp-hosp-group";
+
+  const title = document.createElement("div");
+  title.className = "dp-hosp-group-title";
+  title.textContent = "주변 병원·약국 (심평원)";
+  div.appendChild(title);
+
+  if (errors && errors.medical) {
+    const err = document.createElement("div");
+    err.className = "dp-hosp-error";
+    err.textContent = "심평원 데이터를 불러오지 못했습니다: " + escapeHtml(errors.medical);
+    div.appendChild(err);
+    return div;
+  }
+
+  if (!medical) {
+    const na = document.createElement("div");
+    na.className = "dp-hosp-error";
+    na.textContent = "심평원 데이터 없음";
+    div.appendChild(na);
+    return div;
+  }
+
+  const stats = document.createElement("div");
+  stats.className = "dp-hosp-stats";
+
+  const makeStatCard = (val, label) => {
+    const card = document.createElement("div");
+    card.className = "dp-hosp-stat";
+    card.innerHTML =
+      `<div class="dp-hosp-stat-val">${escapeHtml(val === null || val === undefined ? "—" : String(val))}</div>` +
+      `<div class="dp-hosp-stat-label">${escapeHtml(label)}</div>`;
+    return card;
+  };
+
+  stats.appendChild(makeStatCard(medical.ortho_clinic_count, "같은동 정형외과 의원"));
+  stats.appendChild(makeStatCard(medical.ortho_treating_count, "정형외과 진료 기관"));
+  stats.appendChild(makeStatCard(medical.pharmacy_count, "약국"));
+  div.appendChild(stats);
+
+  const names = Array.isArray(medical.ortho_clinic_names) ? medical.ortho_clinic_names : [];
+  if (names.length > 0) {
+    const nameDiv = document.createElement("div");
+    nameDiv.className = "dp-hosp-names";
+    nameDiv.textContent = "경쟁 의원: " + names.map((n) => escapeHtml(n)).join(", ");
+    div.appendChild(nameDiv);
+  }
+
+  return div;
+}
+
+/** 공공데이터 검증 요약 그룹 렌더링 */
+function renderVerifyGroup(report) {
+  const div = document.createElement("div");
+  div.className = "dp-hosp-group";
+
+  const title = document.createElement("div");
+  title.className = "dp-hosp-group-title";
+  title.textContent = "공공데이터 검증 요약";
+  div.appendChild(title);
+
+  const kv = document.createElement("div");
+  kv.className = "dp-hosp-kv";
+
+  const addRow = (key, val) => {
+    const row = document.createElement("div");
+    row.className = "dp-hosp-kv-row";
+    row.innerHTML =
+      `<span class="dp-hosp-kv-key">${escapeHtml(key)}</span>` +
+      `<span class="dp-hosp-kv-val">${escapeHtml(val || "—")}</span>`;
+    kv.appendChild(row);
+  };
+
+  const land = report.land || {};
+  const building = report.building || {};
+
+  addRow("용도지역", land.zoning || land.usage_zone || "—");
+  addRow("도로접면", land.road_side || land.road_access || "—");
+  addRow("지형", land.terrain || "—");
+  addRow("공시지가", land.official_land_price != null ? won(land.official_land_price) + "/m²" : "—");
+  addRow("건물 주용도", building.main_purpose || building.purpose || "—");
+  addRow("연면적", building.total_floor_area != null ? pyeong(building.total_floor_area) : "—");
+  addRow("층수", building.floors != null ? `${building.floors}층` : "—");
+  addRow("주차 대수", building.parking_count != null ? `${building.parking_count}대` : "—");
+  addRow("승강기", building.elevator != null ? (building.elevator ? "있음" : "없음") : "—");
+  addRow("사용승인일", building.approval_date ? fmtY(String(building.approval_date).replace(/-/g, "")) : "—");
+
+  div.appendChild(kv);
+  return div;
+}
+
+/** 실거래 시세 그룹 렌더링 */
+function renderMarketGroup(market, errors) {
+  const div = document.createElement("div");
+  div.className = "dp-hosp-group";
+
+  const title = document.createElement("div");
+  title.className = "dp-hosp-group-title";
+  title.textContent = "실거래 시세";
+  div.appendChild(title);
+
+  if (errors && errors.market) {
+    const err = document.createElement("div");
+    err.className = "dp-hosp-error";
+    err.textContent = "시세 데이터를 불러오지 못했습니다: " + escapeHtml(errors.market);
+    div.appendChild(err);
+    return div;
+  }
+
+  if (!market) {
+    const na = document.createElement("div");
+    na.className = "dp-hosp-error";
+    na.textContent = "시세 데이터 없음";
+    div.appendChild(na);
+    return div;
+  }
+
+  const kv = document.createElement("div");
+  kv.className = "dp-hosp-kv";
+
+  const addRow = (key, val) => {
+    const row = document.createElement("div");
+    row.className = "dp-hosp-kv-row";
+    row.innerHTML =
+      `<span class="dp-hosp-kv-key">${escapeHtml(key)}</span>` +
+      `<span class="dp-hosp-kv-val">${escapeHtml(val || "—")}</span>`;
+    kv.appendChild(row);
+  };
+
+  addRow("평균 매매가", market.avg_sale_price != null ? won(market.avg_sale_price) : "—");
+  addRow("평균 전세가", market.avg_rent_price != null ? won(market.avg_rent_price) : "—");
+  addRow("거래 건수", market.trade_count != null ? `${market.trade_count}건` : "—");
+  addRow("조회 기간", market.period || "—");
+
+  div.appendChild(kv);
+  return div;
+}
+
+/**
+ * 병원 분석 결과 전체 렌더링
+ * @param {object} report  /api/verify 응답
+ * @param {string} verifyAddr  검증에 사용한 주소
+ */
+function renderHospitalResult(report, verifyAddr) {
+  const wrap = $("dp-hosp-result");
+  wrap.innerHTML = "";
+
+  wrap.appendChild(renderMedicalGroup(report.medical, report.errors));
+  wrap.appendChild(renderVerifyGroup(report));
+  wrap.appendChild(renderMarketGroup(report.market, report.errors));
+
+  // 전체 체크리스트 링크
+  const linkDiv = document.createElement("div");
+  linkDiv.style.marginTop = "12px";
+  const verifyUrl = `/?address=${encodeURIComponent(verifyAddr)}`;
+  linkDiv.innerHTML =
+    `<a class="dp-hosp-link-btn" href="${verifyUrl}" target="_blank" rel="noopener noreferrer">전체 검증 · 체크리스트 열기</a>`;
+  wrap.appendChild(linkDiv);
+
+  wrap.hidden = false;
+}
+
+/** 병원 분석 버튼 이벤트 초기화 */
+function initHospitalAnalysis(addr) {
+  const btn = $("dp-hosp-run-btn");
+  if (!btn) return;
+
+  btn.addEventListener("click", async () => {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = "분석 중…";
+
+    const wrap = $("dp-hosp-result");
+    wrap.hidden = true;
+    wrap.innerHTML = "";
+
+    try {
+      const report = await fetchVerify(addr);
+      renderHospitalResult(report, addr);
+    } catch (err) {
+      wrap.innerHTML =
+        `<div class="dp-hosp-error">분석을 불러오지 못했습니다: ${escapeHtml(err && err.message ? err.message : String(err))}</div>`;
+      wrap.hidden = false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "분석 실행";
+    }
+  });
+}
+
 // ── Tab nav ───────────────────────────────────────────────────────────────────
 
 function initTabNav() {
@@ -513,7 +754,7 @@ function showError(msg, sub) {
 function renderAll(d) {
   renderCaseHeader(d);
   renderGallery(d.photos);
-  renderMap(d.latitude, d.longitude);
+  renderMap(d.latitude, d.longitude, d.addr_jibun || d.addr_road);
   renderBasicTable(d);
   renderPriceCards(d);
   renderRights(d.incumbrances);
@@ -548,6 +789,7 @@ async function boot() {
 
     elLoading.hidden = true;
     renderAll(data);
+    initHospitalAnalysis(data.addr_jibun || data.addr_road || "");
     elBody.hidden = false;
   } catch (err) {
     showError(

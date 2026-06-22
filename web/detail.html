@@ -55,6 +55,7 @@
         <button class="dp-tab-btn" data-target="sec-register">등기/지번</button>
         <button class="dp-tab-btn" data-target="sec-price">시세분석</button>
         <button class="dp-tab-btn" data-target="sec-misc">기타</button>
+        <button class="dp-tab-btn" data-target="sec-hospital">병원분석</button>
       </div>
     </nav>
 
@@ -160,6 +161,13 @@
       <section class="dp-panel dp-section-anchor" id="sec-misc" hidden>
         <div class="dp-panel-title">물건비고</div>
         <div class="dp-notice-text" id="dp-notice-text"></div>
+      </section>
+
+      <!-- 병원 개원 분석 -->
+      <section class="dp-panel dp-section-anchor" id="sec-hospital">
+        <div class="dp-panel-title">병원 개원 분석</div>
+        <button class="dp-hosp-btn" id="dp-hosp-run-btn">분석 실행</button>
+        <div id="dp-hosp-result" class="dp-hosp-result" hidden></div>
       </section>
 
     </main>

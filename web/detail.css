@@ -704,3 +704,128 @@ body::after {
 @media (prefers-reduced-motion: reduce) {
   .dp-spinner { animation: none; border-color: var(--teal); }
 }
+
+/* ── 지도 외부 링크 버튼 ───────────────────────────────────────────────────── */
+.dp-map-links {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 4px;
+}
+.dp-map-link {
+  display: inline-block;
+  padding: 8px 18px;
+  border-radius: 6px;
+  background: var(--teal);
+  color: #fff;
+  font-size: .85rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: opacity .15s;
+}
+.dp-map-link:hover { opacity: .85; }
+
+/* ── 병원 분석 섹션 ──────────────────────────────────────────────────────── */
+.dp-hosp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 20px;
+  border: none;
+  border-radius: 7px;
+  background: var(--navy);
+  color: #fff;
+  font-size: .9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.dp-hosp-btn:hover { opacity: .85; }
+.dp-hosp-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.dp-hosp-result {
+  margin-top: 16px;
+}
+.dp-hosp-group {
+  margin-bottom: 20px;
+}
+.dp-hosp-group-title {
+  font-size: .8rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.dp-hosp-stats {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.dp-hosp-stat {
+  flex: 1 1 120px;
+  background: var(--surface-soft, #f8f9fa);
+  border-radius: 8px;
+  padding: 12px 16px;
+  text-align: center;
+}
+.dp-hosp-stat-val {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--navy);
+}
+.dp-hosp-stat-label {
+  font-size: .78rem;
+  color: var(--ink-faint);
+  margin-top: 2px;
+}
+.dp-hosp-names {
+  margin-top: 10px;
+  font-size: .83rem;
+  color: var(--ink-mid, #555);
+  line-height: 1.6;
+}
+.dp-hosp-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dp-hosp-kv-row {
+  display: flex;
+  gap: 8px;
+  font-size: .88rem;
+  align-items: baseline;
+}
+.dp-hosp-kv-key {
+  flex: 0 0 110px;
+  color: var(--ink-faint);
+  font-size: .8rem;
+}
+.dp-hosp-kv-val {
+  color: var(--ink);
+  font-weight: 500;
+}
+.dp-hosp-error {
+  color: var(--rose, #e55);
+  font-size: .87rem;
+  padding: 12px 0;
+}
+.dp-hosp-link-btn {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 7px 16px;
+  border-radius: 6px;
+  border: 1.5px solid var(--navy);
+  color: var(--navy);
+  font-size: .84rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background .15s, color .15s;
+}
+.dp-hosp-link-btn:hover {
+  background: var(--navy);
+  color: #fff;
+}
