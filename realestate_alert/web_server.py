@@ -515,7 +515,9 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 months = body.get("months", 6)
                 if not isinstance(months, int) or not (1 <= months <= 12):
                     months = 6
-                self._send_json(verify_address(address, market_months=months))
+                report = verify_address(address, market_months=months)
+                _attach_medical_data(report)  # 주변 병원·약국(심평원) 동봉
+                self._send_json(report)
                 return
             if self.path == "/api/market":
                 body = self._read_json_body()

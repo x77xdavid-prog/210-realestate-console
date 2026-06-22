@@ -20,8 +20,8 @@ GEOCODE_URL = "https://api.vworld.kr/req/address"
 
 # 주소 → 좌표 캐시 (지오코딩 일 40,000건 제한 보호 + 응답 속도)
 _geocode_cache: dict[str, tuple[float, float] | None] = {}
-# 주소 → 법정동코드(level4LC) 캐시
-_region_code_cache: dict[str, str | None] = {}
+# 주소 → 법정동(코드/시군구명/동명) 캐시
+_district_cache: dict[str, dict[str, str] | None] = {}
 
 VWORLD_DOMAIN_ENV = "VWORLD_DOMAIN"
 DEFAULT_VWORLD_DOMAIN = "http://localhost"
@@ -163,16 +163,17 @@ def geocode_parcel(
     return coords
 
 
-def geocode_region_code(
+def geocode_legal_district(
     address: str, key: str | None = None, fetcher: Fetcher | None = None
-) -> str | None:
-    """지번주소 → 법정동코드(level4LC). 시군구코드는 앞 5자리, 법정동코드는 앞 10자리.
+) -> dict[str, str] | None:
+    """지번주소 → {code: 법정동코드(level4LC), sigungu: 시군구명, dong: 읍면동명}.
 
-    하드코딩 BJDONG 테이블에 없는 전국 주소의 시세(시군구 lawd_cd) 조회에 쓴다.
+    level4LC는 시군구(5)+법정동(5)+필지구분(1)+본번(4)+부번(4) = PNU 형태(최대 19자리).
+    하드코딩 BJDONG 테이블에 없는 전국 주소의 시세·건축물대장·토지 조회에 쓴다.
     실패하면 None (결과는 캐시됨).
     """
-    if address in _region_code_cache:
-        return _region_code_cache[address]
+    if address in _district_cache:
+        return _district_cache[address]
     url = build_url(
         GEOCODE_URL,
         {
@@ -186,18 +187,30 @@ def geocode_region_code(
             "format": "json",
         },
     )
-    code: str | None = None
+    result: dict[str, str] | None = None
     try:
         payload = parse_json((fetcher or http_get)(url))
         for struct in find_dicts_with_key(payload, "level4LC"):
-            level4lc = str(struct.get("level4LC") or "").strip()
-            if level4lc.isdigit() and len(level4lc) >= 5:
-                code = level4lc
+            code = str(struct.get("level4LC") or "").strip()
+            if code.isdigit() and len(code) >= 5:
+                result = {
+                    "code": code,
+                    "sigungu": str(struct.get("level2") or "").strip(),
+                    "dong": str(struct.get("level3") or "").strip(),
+                }
                 break
-    except Exception:  # noqa: BLE001 — 지오코딩 실패는 흡수(시세는 선택 정보)
-        code = None
-    _region_code_cache[address] = code
-    return code
+    except Exception:  # noqa: BLE001 — 지오코딩 실패는 흡수(부가 정보)
+        result = None
+    _district_cache[address] = result
+    return result
+
+
+def geocode_region_code(
+    address: str, key: str | None = None, fetcher: Fetcher | None = None
+) -> str | None:
+    """지번주소 → 법정동코드(level4LC) 문자열. 시군구코드는 앞 5자리. 실패 시 None."""
+    district = geocode_legal_district(address, key, fetcher)
+    return district["code"] if district else None
 
 
 def road_width_hint(road_side: str | None) -> float | None:
