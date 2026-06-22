@@ -29,12 +29,12 @@ def save_photos(cs_pic_list: list[dict], identity: str, base_dir: Path) -> dict[
         try:
             raw = base64.b64decode(b64, validate=True)
             img = Image.open(io.BytesIO(raw)).convert("RGB")
+            img.thumbnail((MAX_SIDE, MAX_SIDE))
+            n += 1
+            out_dir.mkdir(parents=True, exist_ok=True)
+            fname = f"{n:02d}.jpg"
+            img.save(out_dir / fname, "JPEG", quality=QUALITY, optimize=True)
+            result[n] = f"{folder}/{fname}"
         except Exception:  # noqa: BLE001
             continue
-        img.thumbnail((MAX_SIDE, MAX_SIDE))
-        n += 1
-        out_dir.mkdir(parents=True, exist_ok=True)
-        fname = f"{n:02d}.jpg"
-        img.save(out_dir / fname, "JPEG", quality=QUALITY, optimize=True)
-        result[n] = f"{folder}/{fname}"
     return result
