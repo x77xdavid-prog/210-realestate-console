@@ -70,6 +70,17 @@ def _to_float(v: Any) -> float | None:
         return None
 
 
+def _first_list(r: dict[str, Any], key: str) -> list:
+    v = r.get(key) or []
+    if not v:
+        return []
+    if isinstance(v[0], list):
+        return v[0]
+    if isinstance(v[0], dict):
+        return v
+    return []
+
+
 def parse_detail(payload: dict[str, Any], identity: str,
                  photo_paths: dict[int, str]) -> AuctionDetail:
     r = (payload.get("data") or {}).get("dma_result") or {}
@@ -93,6 +104,45 @@ def parse_detail(payload: dict[str, Any], identity: str,
     incum_text = (dx.get("ndstrcRghCtt") or "").strip()
     incumbrances = tuple(s.strip() for s in incum_text.splitlines() if s.strip()) or ((incum_text,) if incum_text else ())
 
+    presented_outside: list[dict] = []
+    for item in _first_list(r, "gdsNotSugtBldLsstAll"):
+        usage = item.get("etcUsgCtt") or ""
+        structure = item.get("bldStrcDts") or ""
+        area = item.get("bldArDts") or ""
+        appraisal = _to_int(item.get("evlAmt"))
+        note = item.get("sugtBsdsBldRmk") or ""
+        if any([usage, structure, area, appraisal, note]):
+            presented_outside.append({"usage": usage, "structure": structure,
+                                       "area": area, "appraisal": appraisal, "note": note})
+
+    building_detail: list[dict] = []
+    for item in _first_list(r, "bldSdtrDtlLstAll"):
+        building_detail.append({"kind": item.get("rletDvsDts") or "",
+                                 "detail": item.get("bldSdtrDtlDts") or ""})
+
+    jibun_list: list[dict] = []
+    for item in _first_list(r, "gdsRletStLtnoLstAll"):
+        jibun = item.get("rletStLtnoAddr") or ""
+        addr_parts = [item.get("adongSdNm"), item.get("adongSggNm"),
+                      item.get("adongEmdNm"), jibun]
+        addr = " ".join(p for p in addr_parts if p)
+        rdnm = item.get("rdnm") or ""
+        rdnm_bld = item.get("rdnmBldNo") or ""
+        road = (rdnm + " " + rdnm_bld).strip() if rdnm else None
+        jibun_list.append({"jibun": jibun, "addr": addr, "road": road})
+
+    dividend_deadline: str | None = None
+    try:
+        dividend_deadline = (r.get("dstrtDemnInfo") or [{}])[0].get("dstrtDemnLstprdYmd")
+    except Exception:  # noqa: BLE001
+        pass
+
+    sale_notice: str | None = None
+    try:
+        sale_notice = (r.get("dspslGdsDxdyInfo") or {}).get("dspslGdsRmk") or None
+    except Exception:  # noqa: BLE001
+        pass
+
     return AuctionDetail(
         identity=identity, court=str(base.get("cortOfcNm", "")).strip(),
         dept=str(dx.get("cortSptNm") or "").strip(),
@@ -108,6 +158,11 @@ def parse_detail(payload: dict[str, Any], identity: str,
         photos=photos, status_items=tuple(status_items), bid_history=tuple(bids),
         incumbrances=incumbrances, doc_ecid=str(dx.get("dspslGdsSpcfcEcdocId", "")).strip() or None,
         latitude=_to_float(obj.get("stYcrd")), longitude=_to_float(obj.get("stXcrd")),
+        presented_outside=tuple(presented_outside),
+        building_detail=tuple(building_detail),
+        jibun_list=tuple(jibun_list),
+        dividend_deadline=dividend_deadline,
+        sale_notice=sale_notice,
     )
 
 

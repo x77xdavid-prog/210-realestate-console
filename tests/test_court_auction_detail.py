@@ -4,6 +4,37 @@ from realestate_alert.court_auction_detail import (
     parse_detail, status_label, bid_result, extract_incumbrance_tags,
 )
 
+SUBLIST_PAYLOAD = {"data": {"dma_result": {
+    "csBaseInfo": {"cortOfcNm": "서울남부지방법원", "csNo": "20250130000596",
+                   "userCsNo": "2025타경596", "clmAmt": 3182184540},
+    "dspslGdsDxdyInfo": {
+        "aeeEvlAmt": 1146719360, "fstPbancLwsDspslPrc": 1146719360,
+        "flbdNcnt": 0, "dspslDxdyYmd": "20260623", "cortSptNm": "경매10계",
+        "ndstrcRghCtt": "", "realMulKind": "1",
+        "dspslGdsRmk": "일괄매각. 제시외 건물 포함",
+    },
+    "gdsDspslObjctLst": [{"userPrintSt": "서울 영등포구 여의대방로59길 40-2",
+                           "rprsLtnoAddr": "서울 영등포구 신길동 7-31",
+                           "stXcrd": "126.9", "stYcrd": "37.5"}],
+    "gdsDspslDxdyLst": [],
+    "aeeWevlMnpntLst": [],
+    "dstrtDemnInfo": [{"orddcsDvsCd": "021", "dstrtDemnLstprdYmd": "20251015"}],
+    "gdsNotSugtBldLsstAll": [
+        [{"etcUsgCtt": "주택일부", "bldStrcDts": "세맨블록조 및 판넬조",
+          "bldArDts": "56㎡", "evlAmt": 4800000, "sugtBsdsBldRmk": "관찰감가"}],
+        [],
+    ],
+    "bldSdtrDtlLstAll": [
+        [{"rletDvsDts": "일반건물", "bldSdtrDtlDts": "목조기와지붕단층주택\n43.97㎡ "}],
+    ],
+    "gdsRletStLtnoLstAll": [
+        [{"rletStLtnoAddr": "7-31", "adongSdNm": "서울특별시",
+          "adongSggNm": "영등포구", "adongEmdNm": "신길동",
+          "rdnm": "여의대방로59길", "rdnmBldNo": "40-2",
+          "auctnLstDvsCd": "02"}],
+    ],
+}}}
+
 PAYLOAD = {"data": {"dma_result": {
     "csBaseInfo": {"cortOfcNm": "서울서부지방법원", "csNo": "2024타경58264",
                    "userCsNo": "2024타경58264", "clmAmt": "563644488"},
@@ -46,3 +77,36 @@ class DetailParseTests(unittest.TestCase):
         self.assertEqual(d.status_items[0].label, "위치 및 주위환경")
         self.assertEqual(d.photos[0].file, "court:x/01.jpg")
         self.assertIn("임차권등기", d.incumbrances[0])
+
+
+class SublistParseTests(unittest.TestCase):
+    def setUp(self):
+        self.d = parse_detail(SUBLIST_PAYLOAD, "court:2025타경596-1", {})
+
+    def test_presented_outside_parsed(self):
+        self.assertEqual(len(self.d.presented_outside), 1)
+        item = self.d.presented_outside[0]
+        self.assertEqual(item["usage"], "주택일부")
+        self.assertEqual(item["structure"], "세맨블록조 및 판넬조")
+        self.assertEqual(item["area"], "56㎡")
+        self.assertEqual(item["appraisal"], 4800000)
+        self.assertEqual(item["note"], "관찰감가")
+
+    def test_building_detail_parsed(self):
+        self.assertEqual(len(self.d.building_detail), 1)
+        item = self.d.building_detail[0]
+        self.assertEqual(item["kind"], "일반건물")
+        self.assertIn("목조기와지붕", item["detail"])
+
+    def test_jibun_list_parsed(self):
+        self.assertEqual(len(self.d.jibun_list), 1)
+        item = self.d.jibun_list[0]
+        self.assertEqual(item["jibun"], "7-31")
+        self.assertIn("영등포구", item["addr"])
+        self.assertEqual(item["road"], "여의대방로59길 40-2")
+
+    def test_dividend_deadline_parsed(self):
+        self.assertEqual(self.d.dividend_deadline, "20251015")
+
+    def test_sale_notice_parsed(self):
+        self.assertEqual(self.d.sale_notice, "일괄매각. 제시외 건물 포함")

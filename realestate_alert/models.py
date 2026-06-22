@@ -109,3 +109,8 @@ class AuctionDetail:
     doc_ecid: str | None = None
     latitude: float | None = None
     longitude: float | None = None
+    presented_outside: tuple[dict, ...] = ()
+    building_detail: tuple[dict, ...] = ()
+    jibun_list: tuple[dict, ...] = ()
+    dividend_deadline: str | None = None
+    sale_notice: str | None = None
