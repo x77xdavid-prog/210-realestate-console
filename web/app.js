@@ -1080,6 +1080,9 @@ function listingCardHtml(listing) {
         <button type="button" class="button secondary compact" data-action="ledger" data-identity="${escapeHtml(identity)}">
           ${inLedger ? "매물장 ✓" : "매물장 추가"}
         </button>
+        ${listing.detail_link
+          ? `<a class="button secondary compact" href="/detail.html?id=${encodeURIComponent(listing.detail_link.id)}&cs=${encodeURIComponent(listing.detail_link.cs)}&court=${encodeURIComponent(listing.detail_link.court)}&seq=${encodeURIComponent(listing.detail_link.seq)}" target="_blank" rel="noreferrer">전체보기 →</a>`
+          : ""}
       </div>
     </article>
   `;
@@ -3731,7 +3734,10 @@ async function openCourtDetail(link, listing) {
         <div class="cdt-ct">${escapeHtml(d.court || "")} ${escapeHtml(d.dept || "")} · ${escapeHtml(d.case_no || "")} · ${escapeHtml(d.auction_type || "")}</div>
         <h2 class="cdt-addr">${escapeHtml(d.addr_road || d.addr_jibun || "")}</h2>
       </div>
-      <button class="cdt-x" type="button" aria-label="닫기">×</button>
+      <div style="display:flex;align-items:center;gap:8px">
+        <a class="button primary compact" href="/detail.html?id=${encodeURIComponent(link.id)}&cs=${encodeURIComponent(link.cs)}&court=${encodeURIComponent(link.court)}&seq=${encodeURIComponent(link.seq)}" target="_blank" rel="noreferrer">전체보기 →</a>
+        <button class="cdt-x" type="button" aria-label="닫기">×</button>
+      </div>
     </div>
     <div class="cdt-mbody">
       <div class="cdt-two">
