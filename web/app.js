@@ -1002,6 +1002,7 @@ function renderBoard() {
     });
   });
   // 카드의 버튼/링크가 아닌 영역을 클릭하면 상세 정보(지도 패널)로 이동한다
+  // 경매 물건(detail_link 있음)은 상세 모달을 연다
   elements.boardGrid.querySelectorAll("[data-card-identity]").forEach((card) => {
     card.addEventListener("click", (event) => {
       if (event.target.closest("button, a, select, input")) {
@@ -1011,6 +1012,10 @@ function renderBoard() {
         (item) => identityOf(item) === card.dataset.cardIdentity,
       );
       if (!listing) return;
+      if (listing.detail_link) {
+        openCourtDetail(listing.detail_link);
+        return;
+      }
       handleCardAction("map", listing);
     });
   });
@@ -3384,6 +3389,215 @@ document.querySelector("#useFinanceButton").addEventListener("click", () => {
     : listing.deposit ? "매매가" : listing.appraisal_price ? "감정가" : listing.min_bid_price ? "최저입찰가" : "기본값";
   showToast(`매입가 ${koreanMoneyLabel(basePrice)} 반영 (${basis})`);
 });
+/* ===== 경매 상세 모달 ===== */
+
+function cdtPyeong(m2) {
+  const p = Number(m2) / 3.305785;
+  if (!Number.isFinite(p)) return "-";
+  return `${p.toFixed(1)}평`;
+}
+
+function cdtWon(n) {
+  if (n == null || !Number.isFinite(Number(n))) return "-";
+  n = Number(n);
+  const eok = Math.floor(n / 100000000);
+  const man = Math.floor((n % 100000000) / 10000);
+  const won = n % 10000;
+  const parts = [];
+  if (eok > 0) parts.push(`${eok.toLocaleString()}억`);
+  if (man > 0) parts.push(`${man.toLocaleString()}만`);
+  if (won > 0 || parts.length === 0) parts.push(won.toLocaleString());
+  return `${parts.join(" ")}원`;
+}
+
+function cdtFmtDate(s) {
+  if (!s || s.length < 8) return s || "-";
+  return `${s.slice(0, 4)}.${s.slice(4, 6)}.${s.slice(6, 8)}`;
+}
+
+async function openCourtDetail(link) {
+  const url =
+    `/api/listing/detail?id=${encodeURIComponent(link.id)}` +
+    `&cs=${encodeURIComponent(link.cs)}` +
+    `&court=${encodeURIComponent(link.court)}` +
+    `&seq=${encodeURIComponent(link.seq)}`;
+
+  // 스크림 요소 확보
+  let scrim = document.getElementById("cdtScrim");
+  if (!scrim) {
+    scrim = document.createElement("div");
+    scrim.id = "cdtScrim";
+    scrim.className = "cdt-scrim";
+    scrim.innerHTML = `<div class="cdt-modal" id="cdtModal"><div class="cdt-loading">불러오는 중…</div></div>`;
+    document.body.appendChild(scrim);
+    scrim.addEventListener("click", (e) => {
+      if (e.target === scrim) closeCdtDetail();
+    });
+  }
+
+  document.getElementById("cdtModal").innerHTML =
+    `<div class="cdt-loading">불러오는 중…</div>`;
+  scrim.classList.add("cdt-show");
+  document.body.style.overflow = "hidden";
+
+  let d;
+  try {
+    d = await apiJson(url);
+  } catch (err) {
+    document.getElementById("cdtModal").innerHTML =
+      `<div class="cdt-mhd"><span>오류</span><button class="cdt-x" onclick="closeCdtDetail()">×</button></div>` +
+      `<div style="padding:32px;color:var(--rose)">상세 정보를 불러오지 못했습니다.<br>${escapeHtml(String(err))}</div>`;
+    return;
+  }
+
+  // 갤러리
+  const photos = d.photos || [];
+  let galleryHtml;
+  if (photos.length === 0) {
+    galleryHtml = `<div class="cdt-gal"><div class="cdt-gmain" style="display:flex;align-items:center;justify-content:center;color:#7e93a6">사진 없음</div></div>`;
+  } else {
+    const mainSrc = `/api/photo?path=${encodeURIComponent(photos[0].file)}`;
+    const thumbs = photos
+      .map(
+        (p, i) =>
+          `<img src="/api/photo?path=${encodeURIComponent(p.file)}" data-i="${i}" data-file="${escapeHtml(p.file)}" class="${i === 0 ? "cdt-ton" : ""}" onclick="cdtPick(${i})" alt="사진 ${i + 1}">`,
+      )
+      .join("");
+    galleryHtml = `<div class="cdt-gal">
+      <div class="cdt-gmain"><img id="cdtGm" src="${mainSrc}" alt="주요 사진"></div>
+      <div class="cdt-gthumbs">${thumbs}</div>
+    </div>`;
+  }
+
+  // 기본내역
+  const drop =
+    d.appraisal && d.min_bid
+      ? Math.round((1 - d.min_bid / d.appraisal) * 100)
+      : null;
+  const basicRows = [
+    ["용도", escapeHtml(d.usage || "-")],
+    [
+      "토지",
+      d.land_m2 != null
+        ? `${Number(d.land_m2).toLocaleString()}㎡ (${cdtPyeong(d.land_m2)})`
+        : "-",
+    ],
+    [
+      "건물",
+      d.bldg_m2 != null
+        ? `${Number(d.bldg_m2).toLocaleString()}㎡ (${cdtPyeong(d.bldg_m2)})`
+        : "-",
+    ],
+    ["감정가", cdtWon(d.appraisal)],
+    [
+      "최저가",
+      drop != null
+        ? `${cdtWon(d.min_bid)} <span style="color:var(--rose);font-size:12px">(${drop}%↓)</span>`
+        : cdtWon(d.min_bid),
+    ],
+    ["보증금", cdtWon(d.deposit)],
+    ["청구액", cdtWon(d.claim_amt)],
+    ["유찰", d.fail_count != null ? `${d.fail_count}회` : "-"],
+    ["매각일", cdtFmtDate(d.sale_date)],
+  ];
+  const basicHtml = basicRows
+    .map(([k, v]) => `<div class="cdt-bk">${escapeHtml(k)}</div><div class="cdt-bv">${v}</div>`)
+    .join("");
+
+  // 권리분석
+  const incList = d.incumbrances || [];
+  const riskInner =
+    incList.length === 0
+      ? `<li>특이 인수사항 없음</li>`
+      : incList.map((s) => `<li>${escapeHtml(s)}</li>`).join("");
+
+  // 기일내역
+  const bidHist = d.bid_history || [];
+  const tlHtml = bidHist
+    .map((g) => {
+      const resMap = {
+        유찰: { cls: "cdt-ry", label: "유찰" },
+        진행: { cls: "cdt-rgo", label: "진행" },
+        매각결정: { cls: "cdt-rdc", label: "매각결정" },
+        변경: { cls: "cdt-rch", label: "변경" },
+      };
+      const res = resMap[g.result] || { cls: "cdt-ry", label: escapeHtml(g.result || "") };
+      return `<div class="cdt-tlrow">
+        <span class="cdt-tldate">${cdtFmtDate(g.date)}</span>
+        <span class="cdt-tlprice">${g.low != null ? cdtWon(g.low) : "-"}</span>
+        <span class="cdt-tlres ${res.cls}">${res.label}</span>
+      </div>`;
+    })
+    .join("");
+
+  // 현황정보
+  const statusHtml = (d.status_items || [])
+    .map(
+      (item) =>
+        `<div class="cdt-hrow"><div class="cdt-hl">${escapeHtml(item.label)}</div><div class="cdt-ht">${escapeHtml(item.text)}</div></div>`,
+    )
+    .join("");
+
+  document.getElementById("cdtModal").innerHTML = `
+    <div class="cdt-mhd">
+      <div>
+        <div class="cdt-ct">${escapeHtml(d.court || "")} ${escapeHtml(d.dept || "")} · ${escapeHtml(d.case_no || "")} · ${escapeHtml(d.auction_type || "")}</div>
+        <h2 class="cdt-addr">${escapeHtml(d.addr_road || d.addr_jibun || "")}</h2>
+      </div>
+      <button class="cdt-x" onclick="closeCdtDetail()">×</button>
+    </div>
+    <div class="cdt-mbody">
+      <div class="cdt-two">
+        <div>
+          ${galleryHtml}
+          <div class="cdt-panel" style="margin-top:16px">
+            <h3><span class="cdt-bar"></span>기본내역</h3>
+            <div class="cdt-binfo">${basicHtml}</div>
+          </div>
+        </div>
+        <div>
+          <div class="cdt-panel cdt-risk-box">
+            <h3><span class="cdt-bar" style="background:var(--rose)"></span>권리분석 — 인수사항 ⚠</h3>
+            <ul>${riskInner}</ul>
+            <div class="cdt-note">출처: 매각물건명세서(법원경매정보) — 입찰 전 등기부 재확인 필요</div>
+          </div>
+        </div>
+      </div>
+      ${
+        tlHtml
+          ? `<div class="cdt-panel" style="margin-top:18px">
+               <h3><span class="cdt-bar"></span>기일내역</h3>
+               <div class="cdt-tl">${tlHtml}</div>
+             </div>`
+          : ""
+      }
+      ${
+        statusHtml
+          ? `<div class="cdt-panel">
+               <h3><span class="cdt-bar"></span>현황정보 <span style="font-size:11px;color:var(--ink-faint);font-weight:600">(감정평가 요항)</span></h3>
+               <div class="cdt-hyun">${statusHtml}</div>
+             </div>`
+          : ""
+      }
+    </div>`;
+}
+
+function closeCdtDetail() {
+  const scrim = document.getElementById("cdtScrim");
+  if (scrim) scrim.classList.remove("cdt-show");
+  document.body.style.overflow = "";
+}
+
+function cdtPick(i) {
+  const imgs = document.querySelectorAll(".cdt-gthumbs img");
+  const gm = document.getElementById("cdtGm");
+  if (!gm) return;
+  const target = imgs[i];
+  if (!target) return;
+  gm.src = `/api/photo?path=${encodeURIComponent(target.dataset.file || "")}`;
+  imgs.forEach((x) => x.classList.toggle("cdt-ton", +x.dataset.i === i));
+}
+
 /* ===== Boot ===== */
 
 setupReveal();
