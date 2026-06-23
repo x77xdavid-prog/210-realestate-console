@@ -1329,6 +1329,46 @@ td span {
   }
 }
 
+/* 소형폰(<=420px): 7열 캘린더가 셀 최소너비 때문에 가로로 넘치던 문제 해소.
+   min-width:0 으로 1fr 컬럼이 실제로 줄어들게 하고, 여백/폰트를 좁힌다. */
+@media (max-width: 420px) {
+  .cal-main,
+  .cal-side {
+    padding: 14px 12px;
+  }
+  .cal-grid {
+    gap: 3px;
+  }
+  .cal-cell {
+    min-width: 0;
+    min-height: 52px;
+    padding: 5px 5px;
+  }
+  .cal-dn {
+    font-size: 12px;
+  }
+  .cal-cn {
+    font-size: 10.5px;
+    margin-top: 4px;
+  }
+  .cal-cah {
+    font-size: 11px;
+  }
+  .cal-legend {
+    gap: 10px;
+    font-size: 11px;
+    flex-wrap: wrap;
+  }
+
+  /* 조건표 그리드의 minmax(280px) 하한이 305px 폭을 넘치므로 단일 열로 */
+  .criteria-table-grid {
+    grid-template-columns: 1fr;
+  }
+  .criteria-card {
+    padding: 16px;
+  }
+}
+
 .cal-main,
 .cal-side {
   background: var(--surface-strong);
