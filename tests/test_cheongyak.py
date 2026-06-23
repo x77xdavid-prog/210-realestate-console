@@ -32,6 +32,107 @@ SUPPLY_JSON = json.dumps({
 
 TODAY = date(2026, 6, 22)
 
+# 같은 '강서구' LIKE 조회가 서울/부산을 섞어 반환하고, 인천 신혼희망타운처럼
+# 주소에 '강서구'가 없는 행까지 odcloud LIKE가 흘려보내는 실제 상황 재현.
+MIXED_GANGSEO_JSON = json.dumps({
+    "data": [
+        {
+            "HOUSE_NM": "서울강서A", "HSSPLY_ADRES": "서울특별시 강서구 마곡동 747-1",
+            "SUBSCRPT_AREA_CODE_NM": "서울", "MVN_PREARNGE_YM": "202708",
+            "TOT_SUPLY_HSHLDCO": "381", "RCRIT_PBLANC_DE": "2026-05-01",
+        },
+        {
+            "HOUSE_NM": "부산강서B", "HSSPLY_ADRES": "부산광역시 강서구 에코델타시티 28BL",
+            "SUBSCRPT_AREA_CODE_NM": "부산", "MVN_PREARNGE_YM": "202709",
+            "TOT_SUPLY_HSHLDCO": "972", "RCRIT_PBLANC_DE": "2026-05-01",
+        },
+        {
+            "HOUSE_NM": "인천계양C", "HSSPLY_ADRES": "인천광역시 계양구 귤현동, 동양동",
+            "SUBSCRPT_AREA_CODE_NM": "인천", "MVN_PREARNGE_YM": "202710",
+            "TOT_SUPLY_HSHLDCO": "317", "RCRIT_PBLANC_DE": "2026-05-01",
+        },
+    ],
+})
+
+
+class RegionFilteringTests(unittest.TestCase):
+    def test_sido_filters_out_other_city_same_gu(self):
+        """sido='서울특별시'면 부산 강서구·인천 계양구를 모두 제외한다."""
+        with mock.patch.dict("os.environ", {"DATA_GO_KR_API_KEY": "k1"}):
+            notices = fetch_nearby_supply(
+                "강서구", sido="서울특별시",
+                fetcher=lambda url: MIXED_GANGSEO_JSON, today=TODAY,
+            )
+        self.assertEqual([n.house_name for n in notices], ["서울강서A"])
+
+    def test_gu_token_filter_drops_rows_without_gu_even_without_sido(self):
+        """sido가 없어도 주소에 '강서구' 토큰이 없는 인천 계양구 행은 제외된다."""
+        with mock.patch.dict("os.environ", {"DATA_GO_KR_API_KEY": "k1"}):
+            notices = fetch_nearby_supply(
+                "강서구", fetcher=lambda url: MIXED_GANGSEO_JSON, today=TODAY,
+            )
+        names = [n.house_name for n in notices]
+        self.assertNotIn("인천계양C", names)
+        self.assertEqual(names, ["서울강서A", "부산강서B"])  # 입주월 오름차순
+
+    def test_sido_normalization_short_form_matches(self):
+        """'서울'(단축형) 입력도 '서울특별시' 주소와 매칭된다."""
+        with mock.patch.dict("os.environ", {"DATA_GO_KR_API_KEY": "k1"}):
+            notices = fetch_nearby_supply(
+                "강서구", sido="서울",
+                fetcher=lambda url: MIXED_GANGSEO_JSON, today=TODAY,
+            )
+        self.assertEqual([n.house_name for n in notices], ["서울강서A"])
+
+    def test_gu_matched_as_whole_token_not_substring(self):
+        """'서구' 조회가 '강서구' 주소를 substring으로 잘못 매칭하지 않는다 (부산엔 둘 다 존재)."""
+        data = json.dumps({
+            "data": [
+                {
+                    "HOUSE_NM": "부산서구단지", "HSSPLY_ADRES": "부산광역시 서구 암남동 1",
+                    "SUBSCRPT_AREA_CODE_NM": "부산", "MVN_PREARNGE_YM": "202708",
+                    "TOT_SUPLY_HSHLDCO": "100", "RCRIT_PBLANC_DE": "2026-05-01",
+                },
+                {
+                    "HOUSE_NM": "부산강서단지", "HSSPLY_ADRES": "부산광역시 강서구 명지동 2",
+                    "SUBSCRPT_AREA_CODE_NM": "부산", "MVN_PREARNGE_YM": "202709",
+                    "TOT_SUPLY_HSHLDCO": "200", "RCRIT_PBLANC_DE": "2026-05-01",
+                },
+            ],
+        })
+        with mock.patch.dict("os.environ", {"DATA_GO_KR_API_KEY": "k1"}):
+            notices = fetch_nearby_supply(
+                "서구", sido="부산광역시", fetcher=lambda url: data, today=TODAY,
+            )
+        self.assertEqual([n.house_name for n in notices], ["부산서구단지"])
+
+    def test_empty_sido_degrades_to_gu_only(self):
+        """sido=''(미파싱)은 None과 동일하게 시/도 필터를 건너뛰고 구 토큰만으로 거른다."""
+        with mock.patch.dict("os.environ", {"DATA_GO_KR_API_KEY": "k1"}):
+            notices = fetch_nearby_supply(
+                "강서구", sido="", fetcher=lambda url: MIXED_GANGSEO_JSON, today=TODAY,
+            )
+        names = [n.house_name for n in notices]
+        self.assertNotIn("인천계양C", names)  # 구 토큰 없음 → 제외
+        self.assertEqual(names, ["서울강서A", "부산강서B"])  # 시/도 필터는 미적용
+
+    def test_unrecognized_sido_yields_empty(self):
+        """정식 시/도가 아닌 값(예: '수원시')이 들어오면 빈 결과(조용한 드롭) — 프런트가 검증해 빈 sido만 보냄."""
+        with mock.patch.dict("os.environ", {"DATA_GO_KR_API_KEY": "k1"}):
+            notices = fetch_nearby_supply(
+                "강서구", sido="수원시", fetcher=lambda url: MIXED_GANGSEO_JSON, today=TODAY,
+            )
+        self.assertEqual(notices, [])
+
+    def test_report_passes_sido_through(self):
+        with mock.patch.dict("os.environ", {"DATA_GO_KR_API_KEY": "k1"}):
+            r = nearby_supply_report(
+                "강서구", sido="서울특별시", today=TODAY,
+                fetcher=lambda url: MIXED_GANGSEO_JSON,
+            )
+        self.assertIsNone(r["error"])
+        self.assertEqual([s["house_name"] for s in r["supplies"]], ["서울강서A"])
+
 
 class FetchNearbySupplyTests(unittest.TestCase):
     def test_filters_future_and_sorts_by_movein(self):

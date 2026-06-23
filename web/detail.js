@@ -471,12 +471,28 @@ async function loadMarket(address) {
 
 // ── 주변 경매 통계 (자체 수집 데이터 집계) ─────────────────────────────────────
 
-/** 한국 주소에서 구/군·동/읍/면 토큰 추출 */
+/** 대한민국 17개 광역자치단체 정식 명칭 (시/도 검증용) */
+const KOREAN_SIDO = new Set([
+  "서울특별시", "부산광역시", "대구광역시", "인천광역시", "광주광역시",
+  "대전광역시", "울산광역시", "세종특별자치시", "경기도", "강원도",
+  "강원특별자치도", "충청북도", "충청남도", "전라북도", "전라남도",
+  "전북특별자치도", "경상북도", "경상남도", "제주특별자치도", "제주도",
+]);
+
+/** 한국 주소에서 시/도·구/군·동/읍/면 토큰 추출 */
 function parseRegion(addr) {
   const s = String(addr || "");
+  // 시/도는 주소 맨 앞 토큰(서울특별시·부산광역시·경기도 등). 같은 이름의 구를
+  // 구분하려면(서울 강서구 ≠ 부산 강서구) 시/도가 반드시 필요하다. 맨 앞에
+  // 고정(^)하고 정식 명칭만 인정해 '수원시' 같은 시·군을 시/도로 오인하지 않는다.
+  const sidoMatch = s.match(
+    /^\s*([가-힣]+(?:특별자치시|특별자치도|특별시|광역시|자치시|자치도|도|시))(?=\s|$)/
+  );
+  const sido = sidoMatch && KOREAN_SIDO.has(sidoMatch[1]) ? sidoMatch[1] : "";
   const guMatch = s.match(/([가-힣]{1,6}(?:구|군))(?:\s|$)/);
   const dongMatch = s.match(/([가-힣]{1,6}(?:동|읍|면))(?:\s|\d|$)/);
   return {
+    sido,
     gu: guMatch ? guMatch[1] : "",
     dong: dongMatch ? dongMatch[1] : "",
   };
@@ -605,9 +621,11 @@ async function loadNearbyStats(currentAddr, currentIdentity) {
 
 // ── 주변 입주예정 (청약홈 분양정보) ────────────────────────────────────────────
 
-/** GET /api/nearby-supply?region= → 같은 시군구 입주예정 분양 */
-async function fetchSupply(region) {
-  const resp = await fetch(`/api/nearby-supply?region=${encodeURIComponent(region)}`);
+/** GET /api/nearby-supply?region=&sido= → 같은 시/도+시군구 입주예정 분양 */
+async function fetchSupply(region, sido) {
+  const params = new URLSearchParams({ region });
+  if (sido) params.set("sido", sido);
+  const resp = await fetch(`/api/nearby-supply?${params.toString()}`);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return resp.json();
 }
@@ -624,7 +642,9 @@ function renderSupply(data) {
     return;
   }
   const supplies = data && Array.isArray(data.supplies) ? data.supplies : [];
-  const region = (data && data.region) || "";
+  const gu = (data && data.region) || "";
+  const sido = (data && data.sido) || "";
+  const region = sido ? `${sido} ${gu}`.trim() : gu;
   if (supplies.length === 0) {
     body.innerHTML =
       `<div class="dp-market-empty">${escapeHtml(region || "해당 지역")}에 입주예정 신규 분양이 없습니다.</div>`;
@@ -668,13 +688,13 @@ function renderSupply(data) {
 /** 주변 입주예정 비동기 로드 (논블로킹). 주소에서 시군구를 뽑아 조회 */
 async function loadSupply(addr) {
   const body = $("dp-supply-body");
-  const region = parseRegion(addr).gu;
-  if (!region) {
+  const { sido, gu } = parseRegion(addr);
+  if (!gu) {
     if (body) body.innerHTML = '<div class="dp-market-empty">지역 정보를 확인할 수 없습니다.</div>';
     return;
   }
   try {
-    renderSupply(await fetchSupply(region));
+    renderSupply(await fetchSupply(gu, sido));
   } catch (err) {
     if (body) {
       body.innerHTML = '<div class="dp-market-empty">주변 분양정보를 불러오지 못했습니다.</div>';
