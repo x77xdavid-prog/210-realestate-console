@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import hmac
 import json
 import os
@@ -52,6 +53,24 @@ from realestate_alert.store import LEDGER_STATUSES, ListingStore
 from realestate_alert.verify import market_for_address, verify_address
 
 MAX_BODY_BYTES = 256 * 1024
+
+# 정적 텍스트 자산 — gzip으로 보내면 전송량이 4~5배 줄어든다(모바일 LTE 로딩의 핵심).
+# 확장자별로 MIME을 명시해 시스템 mimetypes 차이에 흔들리지 않게 한다(특히 .js 모듈).
+STATIC_CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".mjs": "text/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml; charset=utf-8",
+    ".map": "application/json; charset=utf-8",
+}
+COMPRESSIBLE_SUFFIXES = frozenset(STATIC_CONTENT_TYPES)
+# 너무 작은 파일은 gzip 헤더 오버헤드가 이득보다 커서 압축하지 않는다.
+GZIP_MIN_BYTES = 256
+# ?v= 쿼리가 붙은 자산(app.js?v=…, styles.css?v=…)은 내용이 바뀌면 쿼리도 바뀌므로
+# 안전하게 강한 캐시를 줄 수 있다. 7일이면 재방문 즉시 로드 + 깜빡 잊어도 자가 치유.
+STATIC_CACHE_SECONDS = 7 * 24 * 60 * 60
 
 # 한 소스(예: 클라우드의 느린 법원경매)가 전체 수집을 무한정 막지 못하도록 하는 마감 시간.
 # 이 시간을 넘긴 소스는 이번 주기에서 제외하고, 끝난 소스만으로 결과를 낸다.
@@ -574,7 +593,7 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 return
             if self.path == "/":
                 self.path = "/index.html"
-            super().do_GET()
+            self._serve_static()
 
         def do_POST(self) -> None:
             if not self._authorized():
@@ -863,6 +882,43 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
 
         def log_message(self, format: str, *args) -> None:
             return
+
+        def _serve_static(self) -> None:
+            """정적 파일을 gzip(클라이언트 지원 시)과 캐시 헤더와 함께 서빙한다.
+
+            압축 대상(html/css/js/json/svg)만 직접 처리하고, 이미지·폰트 등
+            비대상은 표준 핸들러(super().do_GET)에 위임한다 — 그쪽 동작은 그대로 둔다.
+            """
+            parsed = urlparse(self.path)
+            suffix = Path(parsed.path).suffix.lower()
+            if suffix not in COMPRESSIBLE_SUFFIXES:
+                super().do_GET()
+                return
+            fs_path = self.translate_path(self.path)  # 쿼리/프래그먼트는 표준 구현이 떼어낸다
+            try:
+                raw = Path(fs_path).read_bytes()
+            except OSError:
+                super().do_GET()  # 404 등 누락 처리는 표준 핸들러에 맡긴다
+                return
+
+            accepts_gzip = "gzip" in (self.headers.get("Accept-Encoding") or "").lower()
+            use_gzip = accepts_gzip and len(raw) >= GZIP_MIN_BYTES
+            body = gzip.compress(raw, 6) if use_gzip else raw
+
+            self.send_response(200)
+            self.send_header("Content-Type", STATIC_CONTENT_TYPES[suffix])
+            if use_gzip:
+                self.send_header("Content-Encoding", "gzip")
+            if accepts_gzip:
+                # 프록시·CDN이 압축/비압축 응답을 분리 캐시하도록 한다.
+                self.send_header("Vary", "Accept-Encoding")
+            self.send_header("Content-Length", str(len(body)))
+            if parsed.query:
+                self._own_cache_control = True  # end_headers의 no-cache 기본값을 덮어쓴다
+                self.send_header("Cache-Control", f"public, max-age={STATIC_CACHE_SECONDS}")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
 
         def _handle_auto_override(self, config_path: Path) -> None:
             """공공 API가 못 채운 auto·info 항목을 제공 자료 근거로 수동 입력(저장)한다.

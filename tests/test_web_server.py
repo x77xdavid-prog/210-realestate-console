@@ -61,6 +61,96 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(with_cache["latitude"], 37.5)
         self.assertEqual(with_cache["longitude"], 127.0)
 
+    def test_static_text_assets_are_gzipped(self):
+        """CSS/JS 같은 텍스트 정적 파일은 클라이언트가 gzip을 받으면 압축해 보낸다."""
+        import gzip as _gzip
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            css_text = "body{color:#123456}\n" * 200  # 반복 텍스트라 gzip이 확실히 더 작다
+            # newline="" 으로 Windows 개행 변환(\n→\r\n)을 막아 바이트 비교를 정확히 한다
+            (root / "styles.css").write_text(css_text, encoding="utf-8", newline="")
+            server = _start_server(config_path, root)
+            try:
+                status, headers, body = _request_raw(
+                    server, "GET", "/styles.css?v=abc",
+                    headers={"Accept-Encoding": "gzip"},
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("content-encoding"), "gzip")
+        self.assertIn("accept-encoding", (headers.get("vary") or "").lower())
+        self.assertEqual(_gzip.decompress(body).decode("utf-8"), css_text)
+        self.assertLess(len(body), len(css_text.encode("utf-8")))
+        self.assertTrue(headers.get("content-type", "").startswith("text/css"))
+
+    def test_versioned_static_asset_is_cacheable(self):
+        """?v= 쿼리가 붙은 자산은 강하게 캐시한다(no-cache 가 아니라 max-age)."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            (root / "app.js").write_text("export const x=1;\n" * 100, encoding="utf-8")
+            server = _start_server(config_path, root)
+            try:
+                status, headers, _ = _request_raw(
+                    server, "GET", "/app.js?v=20260623a",
+                    headers={"Accept-Encoding": "gzip"},
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertEqual(status, 200)
+        cache = headers.get("cache-control") or ""
+        self.assertIn("max-age", cache)
+        self.assertNotEqual(cache, "no-cache")
+        self.assertTrue(headers.get("content-type", "").startswith("text/javascript"))
+
+    def test_unversioned_entry_document_revalidates(self):
+        """버전 쿼리 없는 진입 문서(index.html)는 재검증(no-cache)하되 gzip은 적용된다."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            (root / "index.html").write_text("<!doctype html>\n<title>x</title>\n" * 50, encoding="utf-8")
+            server = _start_server(config_path, root)
+            try:
+                status, headers, _ = _request_raw(
+                    server, "GET", "/index.html",
+                    headers={"Accept-Encoding": "gzip"},
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("cache-control"), "no-cache")
+        self.assertEqual(headers.get("content-encoding"), "gzip")
+
+    def test_static_asset_skips_gzip_without_accept_encoding(self):
+        """클라이언트가 gzip을 받지 않으면 원본 그대로(미압축) 보낸다."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            css_text = "body{color:#123456}\n" * 50
+            (root / "styles.css").write_text(css_text, encoding="utf-8", newline="")
+            server = _start_server(config_path, root)
+            try:
+                status, headers, body = _request_raw(
+                    server, "GET", "/styles.css",
+                    headers={},  # Accept-Encoding 없음
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertEqual(status, 200)
+        self.assertIsNone(headers.get("content-encoding"))
+        self.assertEqual(body.decode("utf-8"), css_text)
+
     def test_api_listings_exposes_collection_progress(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -131,11 +221,11 @@ class WebServerTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
         self.assertEqual(status, 200)
-        self.assertEqual(headers.get("Content-Type"), "image/png")
+        self.assertEqual(headers.get("content-type"), "image/png")
         self.assertEqual(body, png)
         gm.assert_called_once_with(13, 6985, 3172)
         # 타일은 7일 캐시. 전역 no-cache 오버라이드가 덮어쓰지 않아야 한다(브라우저 타일 캐시).
-        self.assertEqual(headers.get("Cache-Control"), "public, max-age=604800")
+        self.assertEqual(headers.get("cache-control"), "public, max-age=604800")
 
     def test_api_map_tile_404_when_unavailable(self):
         from realestate_alert.map_tiles import MapTileError
@@ -836,7 +926,7 @@ class DocumentApiTests(unittest.TestCase):
         self.assertEqual(uploaded["documents"][0]["name"], "등기부.pdf")
         self.assertEqual(len(listed["documents"]), 1)
         self.assertEqual(status, 200)
-        self.assertEqual(headers.get("Content-Type"), "application/pdf")
+        self.assertEqual(headers.get("content-type"), "application/pdf")
         self.assertTrue(body.startswith(b"%PDF"))
         self.assertEqual(counts["counts"].get("direct_1"), 1)
         self.assertEqual(emptied["documents"], [])
@@ -986,19 +1076,6 @@ def _listings_when_ready(server: ThreadingHTTPServer, attempts: int = 50) -> dic
     return response
 
 
-def _request_raw(
-    server: ThreadingHTTPServer, method: str, path: str
-) -> tuple[int, dict, bytes]:
-    connection = http.client.HTTPConnection(server.server_address[0], server.server_address[1], timeout=5)
-    try:
-        connection.request(method, path)
-        response = connection.getresponse()
-        body = response.read()
-        return response.status, dict(response.getheaders()), body
-    finally:
-        connection.close()
-
-
 def _basic_auth(user: str, password: str) -> dict[str, str]:
     token = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
     return {"Authorization": f"Basic {token}"}
@@ -1066,6 +1143,24 @@ def _start_server(config_path: Path, web_root: Path) -> ThreadingHTTPServer:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server
+
+
+def _request_raw(
+    server: ThreadingHTTPServer,
+    method: str,
+    path: str,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, dict[str, str], bytes]:
+    """정적 자산 검증용 — 본문을 디코딩하지 않고 헤더(소문자 키)와 raw 바이트를 돌려준다."""
+    connection = http.client.HTTPConnection(server.server_address[0], server.server_address[1], timeout=5)
+    try:
+        connection.request(method, path, headers=dict(headers or {}))
+        response = connection.getresponse()
+        body = response.read()
+        hdrs = {key.lower(): value for key, value in response.getheaders()}
+        return response.status, hdrs, body
+    finally:
+        connection.close()
 
 
 def _request_json(
