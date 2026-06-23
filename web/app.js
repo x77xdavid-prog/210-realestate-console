@@ -3514,6 +3514,10 @@ function setupReveal() {
     targets.forEach((target) => target.classList.add("visible"));
     return;
   }
+  // threshold는 0이어야 한다. 0.12는 "요소 면적의 12%가 화면에 보일 때"라,
+  // 뷰포트보다 ~8배 넘게 긴 섹션(매물 30건이 1열로 쌓인 모바일 보드는 2만px,
+  // 뷰포트의 23배)은 12%에 영영 도달하지 못해 영구히 opacity:0(투명)으로 남는다.
+  // threshold 0 + rootMargin으로 섹션이 화면에 들어오기 시작하면 바로 발현한다.
   const observer = new IntersectionObserver(
     (entries) => {
       entries.forEach((entry) => {
@@ -3523,7 +3527,7 @@ function setupReveal() {
         }
       });
     },
-    { threshold: 0.12 },
+    { rootMargin: "0px 0px -40px 0px", threshold: 0 },
   );
   targets.forEach((target) => observer.observe(target));
 }
