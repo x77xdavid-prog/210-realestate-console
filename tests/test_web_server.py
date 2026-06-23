@@ -61,6 +61,73 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(with_cache["latitude"], 37.5)
         self.assertEqual(with_cache["longitude"], 127.0)
 
+    def test_warm_match_coords_persists_only_successes(self):
+        """워밍이 성공 좌표만 DB에 저장(재시작 후에도 핀 유지)하고, 실패(None)는 저장하지
+        않아 다음 수집 때 재시도되게 하며, 이미 저장된 주소는 재호출하지 않는다."""
+        import realestate_alert.land_info as land_info
+        from realestate_alert.web_server import _warm_match_coords
+        from realestate_alert.store import ListingStore
+        from realestate_alert.models import Listing
+
+        def mk(loc, ext):
+            return Listing(
+                source="onbid", external_id=ext, title="t", location=loc,
+                deposit=0, monthly_rent=0, area_m2=0.0, floor=None, premium=None,
+                url="https://www.onbid.co.kr",
+            )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ListingStore(Path(temp_dir) / "seen.sqlite3")
+            store.initialize()
+            ok = mk("서울 양천구 목동 1", "ok")
+            fail = mk("서울 양천구 목동 2", "fail")
+            land_info._geocode_cache.clear()
+
+            def fake_geocode(addr, *a, **k):
+                return (37.5, 127.0) if "목동 1" in addr else None
+
+            with mock.patch("realestate_alert.web_server.geocode_parcel", side_effect=fake_geocode):
+                _warm_match_coords(store, [ok, fail])
+
+            coords = store.all_coords()
+            self.assertEqual(coords.get(ok.location), (37.5, 127.0))  # 성공 → 저장
+            self.assertNotIn(fail.location, coords)                    # 실패 → 미저장(재시도 대상)
+
+            # 이미 저장된 주소는 다시 지오코딩하지 않는다(V-World 호출 절약)
+            with mock.patch(
+                "realestate_alert.web_server.geocode_parcel",
+                side_effect=AssertionError("이미 저장된 주소는 재호출 금지"),
+            ):
+                _warm_match_coords(store, [ok])
+
+    def test_api_geocode_uses_persisted_cache(self):
+        """이미 저장된 주소는 V-World 호출 없이 DB 좌표로 즉시 응답한다(502 회피)."""
+        from urllib.parse import quote
+        from realestate_alert.store import ListingStore
+        import realestate_alert.web_server as ws
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            store = ListingStore(root / "seen.sqlite3")
+            store.initialize()
+            store.save_coords("서울 양천구 목동 917-9", 37.5301, 126.8649)
+            server = _start_server(config_path, root)
+            try:
+                with mock.patch.object(
+                    ws, "geocode_parcel",
+                    side_effect=AssertionError("캐시된 주소는 V-World 호출 금지"),
+                ):
+                    resp = _request_json(
+                        server, "GET", "/api/geocode?address=" + quote("서울 양천구 목동 917-9")
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertEqual(resp["latitude"], 37.5301)
+        self.assertEqual(resp["longitude"], 126.8649)
+
     def test_static_text_assets_are_gzipped(self):
         """CSS/JS 같은 텍스트 정적 파일은 클라이언트가 gzip을 받으면 압축해 보낸다."""
         import gzip as _gzip
@@ -763,6 +830,33 @@ class DashboardAuthTests(unittest.TestCase):
                 server.server_close()
 
         self.assertIn("listings", ok)
+
+    def test_head_requires_password_like_get(self):
+        """HEAD도 비번이 설정되면 인증을 요구한다.
+
+        과거엔 do_GET만 _authorized()를 검사하고 HEAD(SimpleHTTPRequestHandler
+        기본)는 인증을 거치지 않아, DASHBOARD_PASSWORD가 설정된 라이브에서도
+        HEAD가 200을 돌려줬다. 그 회귀를 막는다.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            (root / "index.html").write_text("<!doctype html><title>x</title>", encoding="utf-8")
+            server = _start_server(config_path, root)
+            try:
+                with mock.patch.dict("os.environ", {"DASHBOARD_PASSWORD": "secret210"}):
+                    no_auth_status, _h, no_auth_body = _request_raw(server, "HEAD", "/")
+                    ok_status, _h2, _b2 = _request_raw(
+                        server, "HEAD", "/",
+                        headers=_basic_auth("아무거나", "secret210"),
+                    )
+            finally:
+                server.shutdown()
+                server.server_close()
+
+        self.assertEqual(no_auth_status, 401)  # 비번 없으면 HEAD도 막힌다
+        self.assertEqual(no_auth_body, b"")    # HEAD 응답엔 본문이 없어야 한다
+        self.assertEqual(ok_status, 200)       # 올바른 비번이면 통과
 
     def test_no_password_means_open_local_access(self):
         with tempfile.TemporaryDirectory() as temp_dir:

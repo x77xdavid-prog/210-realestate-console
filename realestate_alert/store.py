@@ -72,6 +72,18 @@ class ListingStore:
                     )
                     """
                 )
+                # 주소→좌표 영속 캐시. 좌표는 불변이라 만료가 없고, 성공한 것만 저장해 두면
+                # 워커 재시작(인메모리 캐시 소실)에도 지도 핀이 유지된다.
+                connection.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS geocode_cache (
+                        address TEXT PRIMARY KEY,
+                        latitude REAL NOT NULL,
+                        longitude REAL NOT NULL,
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
 
     def mark_seen_if_new(self, listing: Listing) -> bool:
         self.initialize()
@@ -273,6 +285,35 @@ class ListingStore:
                 "SELECT identity, detail_json FROM auction_detail"
             ).fetchall()
         return {identity: json.loads(dj) for identity, dj in rows}
+
+    # --- 지오코딩 좌표 캐시(영속) ---
+
+    def save_coords(self, address: str, latitude: float, longitude: float) -> None:
+        """주소→좌표를 영속 저장한다(같은 주소는 갱신). 성공 좌표만 저장하므로
+        워커 재시작에도 핀이 유지되고, 미저장 주소는 다음 수집 때 다시 시도된다."""
+        self.initialize()
+        with closing(self._connect()) as connection:
+            with connection:
+                connection.execute(
+                    """
+                    INSERT INTO geocode_cache (address, latitude, longitude, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(address) DO UPDATE SET
+                        latitude = excluded.latitude,
+                        longitude = excluded.longitude,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (address, latitude, longitude),
+                )
+
+    def all_coords(self) -> dict[str, tuple[float, float]]:
+        """저장된 모든 주소→좌표. 목록 응답의 좌표를 채우고 인메모리 캐시를 prime할 때 쓴다."""
+        self.initialize()
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                "SELECT address, latitude, longitude FROM geocode_cache"
+            ).fetchall()
+        return {address: (latitude, longitude) for address, latitude, longitude in rows}
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.database_path)

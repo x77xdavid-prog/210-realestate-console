@@ -32,6 +32,31 @@ class StoreTests(unittest.TestCase):
             self.assertTrue(store.mark_seen_if_new(listing))
             self.assertFalse(store.mark_seen_if_new(listing))
 
+    def test_geocode_coords_persist_across_instances(self):
+        """좌표를 DB에 저장하면 새 인스턴스(워커 재시작 모사)에서도 그대로 읽힌다."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db = Path(temp_dir) / "seen.sqlite3"
+            writer = ListingStore(db)
+            writer.initialize()
+            writer.save_coords("서울특별시 양천구 목동 917-9", 37.5301, 126.8649)
+
+            # 재시작 시뮬레이션: 완전히 새 인스턴스로 같은 DB를 연다(인메모리 공유 없음)
+            reader = ListingStore(db)
+            coords = reader.all_coords()
+            self.assertIn("서울특별시 양천구 목동 917-9", coords)
+            self.assertEqual(coords["서울특별시 양천구 목동 917-9"], (37.5301, 126.8649))
+
+    def test_save_coords_overwrites_same_address(self):
+        """같은 주소를 다시 저장하면 최신 좌표로 갱신된다(중복 행 안 생김)."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = ListingStore(Path(temp_dir) / "seen.sqlite3")
+            store.initialize()
+            store.save_coords("서울 강남구 역삼동 1", 37.5, 127.0)
+            store.save_coords("서울 강남구 역삼동 1", 37.6, 127.1)
+            coords = store.all_coords()
+            self.assertEqual(len(coords), 1)
+            self.assertEqual(coords["서울 강남구 역삼동 1"], (37.6, 127.1))
+
     def test_is_recent_treats_unseen_and_recent_as_new(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             store = ListingStore(Path(temp_dir) / "seen.sqlite3")

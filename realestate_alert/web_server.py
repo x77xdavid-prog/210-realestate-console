@@ -250,13 +250,23 @@ def _collect_with_progress(config_path: Path, config) -> tuple[ListingSnapshot, 
     return snapshot, complete
 
 
-def _warm_match_coords(listings: list[Listing]) -> None:
-    """조건 일치 매물의 좌표를 캐시에 채운다(백그라운드 — 스피너/완료와 무관).
+def _warm_match_coords(store: ListingStore, listings: list[Listing]) -> None:
+    """조건 일치 매물의 좌표를 영속 캐시(DB)에 채운다(백그라운드 — 스피너/완료와 무관).
 
-    HTTP 응답은 cached_coords로 캐시만 읽으므로, 워밍 전이면 핀이 없고 다음 새로고침에 나타난다.
+    이미 저장된 주소는 건너뛰어 느린 V-World 호출을 아끼고, 성공한 좌표만 저장한다.
+    실패(None)는 저장하지 않아 다음 수집 주기에 자동으로 다시 시도된다(자가 치유).
+    좌표는 DB에 영속되므로 워커 재시작(인메모리 캐시 소실)에도 핀이 유지된다.
+    HTTP 응답은 store.all_coords()로 저장된 좌표만 읽으므로 워밍 전이면 핀이 없고
+    다음 새로고침에 나타난다.
     """
+    have = store.all_coords()
     for listing in listings:
-        _safe_geocode(listing.location)
+        if listing.location in have:
+            continue
+        coords = _safe_geocode(listing.location)
+        if coords:
+            store.save_coords(listing.location, coords[0], coords[1])
+            have[listing.location] = coords  # 같은 주소 중복 매물의 재호출 방지
 
 
 def _store_snapshot(key: str, snapshot: ListingSnapshot, config, complete: bool) -> None:
@@ -305,7 +315,7 @@ def _run_collection(config_path: Path) -> None:
         snapshot, complete = _collect_with_progress(config_path, config)
         _store_snapshot(key, snapshot, config, complete)
         # 완료 표시 후 좌표를 천천히 채운다(스피너와 무관, 지도 핀은 다음 새로고침에 표시).
-        _warm_match_coords(snapshot.matched)
+        _warm_match_coords(ListingStore(config.database_path), snapshot.matched)
         _enrich_court_photos(config, snapshot)
     except Exception as error:  # noqa: BLE001 — 수집 실패는 다음 주기에 재시도
         print(f"[collect] 백그라운드 수집 실패: {error}")
@@ -347,7 +357,7 @@ def _run_scan(config_path: Path) -> None:
         snapshot, complete = _collect_with_progress(config_path, config)
         result = run_once(config, snapshot=snapshot)
         _store_snapshot(key, snapshot, config, complete)
-        _warm_match_coords(snapshot.matched)
+        _warm_match_coords(ListingStore(config.database_path), snapshot.matched)
         print(f"[scan] 완료 — 수집 {result.fetched_count} / 신규 {len(result.notified)}")
     except Exception as error:  # noqa: BLE001
         print(f"[scan] 백그라운드 스캔 실패: {error}")
@@ -500,7 +510,13 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 if not address:
                     self._send_json({"error": "address가 필요합니다."}, status=400)
                     return
-                coords = _safe_geocode(address)
+                store = _store(config_path)
+                # 영속 캐시 우선 — 이미 변환된 주소는 V-World 호출 없이 즉시 응답(502 회피).
+                coords = store.all_coords().get(address)
+                if coords is None:
+                    coords = _safe_geocode(address)  # 캐시 미스 → V-World(실패 시 None, graceful)
+                    if coords:
+                        store.save_coords(address, coords[0], coords[1])  # 다음부턴 즉시 응답
                 self._send_json(
                     {
                         "address": address,
@@ -594,6 +610,15 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
             if self.path == "/":
                 self.path = "/index.html"
             self._serve_static()
+
+        def do_HEAD(self) -> None:
+            # do_GET과 동일하게 인증을 검사한다 — 검사가 없으면 비번이 설정된
+            # 라이브에서도 HEAD가 파일 존재·헤더를 인증 없이 노출한다.
+            self._own_cache_control = False  # 요청마다 초기화(keep-alive 재사용 대비)
+            if not self._authorized():
+                self._send_unauthorized()
+                return
+            super().do_HEAD()
 
         def do_POST(self) -> None:
             if not self._authorized():
@@ -1074,7 +1099,8 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(body)
+            if self.command != "HEAD":  # HEAD 응답엔 본문을 쓰지 않는다(헤더만)
+                self.wfile.write(body)
 
         def _read_json_body(self) -> dict[str, Any]:
             try:
@@ -1367,6 +1393,8 @@ def _listings_payload(config_path: Path) -> dict[str, Any]:
     first_seen = store.first_seen_map()
     favorites = store.favorite_identities()
     details = store.get_all_details()
+    # 좌표는 영속 DB에서 한 번에 읽는다 — 워커가 재시작돼 인메모리 캐시가 비어도 핀이 유지된다.
+    coords_by_address = store.all_coords()
 
     def to_dict(listing: Listing, is_match: bool) -> dict[str, Any]:
         detail = details.get(listing.identity) if listing.source == "court" else None
@@ -1379,6 +1407,7 @@ def _listings_payload(config_path: Path) -> dict[str, Any]:
             # 수집량이 수백 건이라 조건 일치 매물만 좌표 변환한다 (나머지는 선택 시 /api/geocode)
             with_coords=is_match,
             detail=detail,
+            coords_by_address=coords_by_address,
         )
 
     matched_ids = {listing.identity for listing in snapshot.matched}
@@ -1564,10 +1593,17 @@ def _listing_to_dict(
     first_seen_at: str | None = None,
     with_coords: bool = True,
     detail: dict[str, Any] | None = None,
+    coords_by_address: dict[str, tuple[float, float]] | None = None,
 ) -> dict[str, Any]:
-    # HTTP 응답 경로에서는 절대 동기 지오코딩하지 않는다 — 캐시된 좌표만 읽는다(없으면 None).
-    # 좌표 워밍은 백그라운드 수집(_warm_match_coords)이 담당한다.
-    coords = cached_coords(listing.location) if with_coords else None
+    # HTTP 응답 경로에서는 절대 동기 지오코딩하지 않는다 — 저장된 좌표만 읽는다(없으면 None).
+    # 좌표 워밍은 백그라운드 수집(_warm_match_coords)이 DB에 채운다. coords_by_address가
+    # 주어지면 그 영속 캐시(DB)를 쓰고(워커 재시작에도 유지), 없으면 인메모리 캐시로 폴백.
+    if not with_coords:
+        coords = None
+    elif coords_by_address is not None:
+        coords = coords_by_address.get(listing.location)
+    else:
+        coords = cached_coords(listing.location)
     return {
         "identity": listing.identity,
         "source": listing.source,
