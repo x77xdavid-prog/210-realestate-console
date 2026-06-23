@@ -117,7 +117,7 @@ const elements = {
   areaMax: document.querySelector("#areaMax"),
   schedulePanel: document.querySelector("#schedulePanel"),
   scheduleStrip: document.querySelector("#scheduleStrip"),
-  kakaoMap: document.querySelector("#kakaoMap"),
+  searchMap: document.querySelector("#searchMap"),
   mapSearchPlaceholder: document.querySelector("#mapSearchPlaceholder"),
   ledgerRows: document.querySelector("#ledgerRows"),
   ledgerSummary: document.querySelector("#ledgerSummary"),
@@ -184,7 +184,7 @@ const state = {
   areaMin: null,
   areaMax: null,
   dateFilter: null,
-  kakaoKey: null,
+  vworldMap: false,
   hasServer: false,
   selectedListing: null,
   checklist: {
@@ -1714,34 +1714,20 @@ function nextMonth(ym) {
   return String(d.getFullYear()) + String(d.getMonth() + 1).padStart(2, "0");
 }
 
-/* ===== 지도검색 (Kakao) ===== */
+/* ===== 지도검색 (Leaflet — VWorld 한국형 지도 / OpenStreetMap 폴백) ===== */
+// 카카오 JS 키가 반려되어 키 노출이 없는 Leaflet 기반으로 통일했다. 서버에 VWorld
+// 키가 있으면 서버가 중계하는 한국형 지도(/api/map-tile)를, 없으면 키가 필요 없는
+// OpenStreetMap을 쓴다 — 어느 쪽이든 사용자는 항상 지도를 본다.
 
 const FIT_MARKER_COLOR = { open: "#0f9d58", build: "#0e7490", check: "#f59e0b", unfit: "#7e93a6" };
-let kakaoLoadPromise = null;
-let kakaoMapObj = null;
-let kakaoMarkers = [];
-let kakaoInfoWindow = null;
 
 async function loadAppConfig() {
   try {
     const cfg = await apiJson("/api/config");
-    state.kakaoKey = (cfg.kakao_js_key || "").trim();
+    state.vworldMap = !!cfg.vworld_map;
   } catch {
-    state.kakaoKey = "";
+    state.vworldMap = false;
   }
-}
-
-function loadKakaoSdk(key) {
-  if (window.kakao && window.kakao.maps) return Promise.resolve();
-  if (kakaoLoadPromise) return kakaoLoadPromise;
-  kakaoLoadPromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(key)}&autoload=false`;
-    script.onload = () => window.kakao.maps.load(resolve);
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-  return kakaoLoadPromise;
 }
 
 function pinSvg(color) {
@@ -1757,14 +1743,6 @@ function fitColorFor(listing) {
   return FIT_MARKER_COLOR[level] || FIT_MARKER_COLOR.check;
 }
 
-function mapPinImage(color) {
-  return new kakao.maps.MarkerImage(
-    "data:image/svg+xml;charset=utf-8," + encodeURIComponent(pinSvg(color)),
-    new kakao.maps.Size(26, 34),
-    { offset: new kakao.maps.Point(13, 34) },
-  );
-}
-
 function mapInfoHtml(listing) {
   const fit = listing.hospital_fit ? listing.hospital_fit.label : "";
   const appraisal = listing.appraisal_price
@@ -1778,18 +1756,15 @@ function mapInfoHtml(listing) {
 function renderMapSearch() {
   const pins = state.listings.filter((item) => item.latitude && item.longitude);
   elements.mapSearchPlaceholder.hidden = true;
-  elements.kakaoMap.hidden = false;
-  // Kakao 키가 있으면 카카오(한국형 지도·로드뷰)로, 없으면 키가 필요 없는
-  // OpenStreetMap(Leaflet)으로 — 어느 쪽이든 키 없이도 지도는 항상 보인다.
-  const provider = state.kakaoKey
-    ? loadKakaoSdk(state.kakaoKey).then(() => buildKakaoMap(pins))
-    : loadLeaflet().then(() => buildLeafletMap(pins));
-  provider.catch(() => {
-    elements.kakaoMap.hidden = true;
-    elements.mapSearchPlaceholder.hidden = false;
-    elements.mapSearchPlaceholder.innerHTML =
-      '<div class="map-placeholder-card">지도를 불러오지 못했습니다. 인터넷 연결을 확인하세요.</div>';
-  });
+  elements.searchMap.hidden = false;
+  loadLeaflet()
+    .then(() => buildLeafletMap(pins))
+    .catch(() => {
+      elements.searchMap.hidden = true;
+      elements.mapSearchPlaceholder.hidden = false;
+      elements.mapSearchPlaceholder.innerHTML =
+        '<div class="map-placeholder-card">지도를 불러오지 못했습니다. 인터넷 연결을 확인하세요.</div>';
+    });
 }
 
 /* ===== OpenStreetMap 폴백 (Leaflet — 키 불필요) ===== */
@@ -1815,15 +1790,38 @@ function loadLeaflet() {
   return leafletLoadPromise;
 }
 
+function osmTileLayer() {
+  return L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors",
+  });
+}
+
+function baseTileLayer() {
+  // VWorld 키가 서버에 있으면 한국형 지도(서버 중계 타일)를, 없으면 OSM.
+  if (!state.vworldMap) return osmTileLayer();
+  const vworld = L.tileLayer("/api/map-tile/{z}/{x}/{y}.png", {
+    minZoom: 6,
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.vworld.kr" target="_blank" rel="noopener">VWorld</a> · 국토교통부',
+  });
+  // 타일 프록시가 실패(키 만료·네트워크)하면 한 번만 OSM으로 교체해 빈 지도를 막는다.
+  let swapped = false;
+  vworld.on("tileerror", () => {
+    if (swapped || !leafletMapObj) return;
+    swapped = true;
+    leafletMapObj.removeLayer(vworld);
+    osmTileLayer().addTo(leafletMapObj);
+  });
+  return vworld;
+}
+
 function buildLeafletMap(pins) {
   if (!window.L) return;
   if (!leafletMapObj) {
     const center = pins.length ? [pins[0].latitude, pins[0].longitude] : [37.4787, 126.9516]; // 관악·신림 부근
-    leafletMapObj = L.map(elements.kakaoMap, { scrollWheelZoom: true }).setView(center, 12);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors',
-    }).addTo(leafletMapObj);
+    leafletMapObj = L.map(elements.searchMap, { scrollWheelZoom: true }).setView(center, 12);
+    baseTileLayer().addTo(leafletMapObj);
   }
   leafletMarkers.forEach((marker) => marker.remove());
   leafletMarkers = [];
@@ -1845,38 +1843,6 @@ function buildLeafletMap(pins) {
   if (latlngs.length) leafletMapObj.fitBounds(latlngs, { padding: [40, 40], maxZoom: 15 });
   // 패널이 숨겨진 상태에서 생성됐을 수 있으므로 크기를 다시 계산한다.
   setTimeout(() => leafletMapObj && leafletMapObj.invalidateSize(), 60);
-}
-
-function buildKakaoMap(pins) {
-  if (!window.kakao || !window.kakao.maps) return;
-  if (!kakaoMapObj) {
-    const center = pins.length
-      ? new kakao.maps.LatLng(pins[0].latitude, pins[0].longitude)
-      : new kakao.maps.LatLng(37.5266, 126.8664); // 양천구 목동 부근
-    kakaoMapObj = new kakao.maps.Map(elements.kakaoMap, { center, level: 6 });
-    kakaoInfoWindow = new kakao.maps.InfoWindow({ removable: true });
-  }
-  kakaoMarkers.forEach((marker) => marker.setMap(null));
-  kakaoMarkers = [];
-  const bounds = new kakao.maps.LatLngBounds();
-  pins.forEach((listing) => {
-    const position = new kakao.maps.LatLng(listing.latitude, listing.longitude);
-    const level = (listing.hospital_fit && listing.hospital_fit.level) || "check";
-    const marker = new kakao.maps.Marker({
-      position,
-      image: mapPinImage(FIT_MARKER_COLOR[level] || FIT_MARKER_COLOR.check),
-      title: listing.title,
-    });
-    marker.setMap(kakaoMapObj);
-    kakao.maps.event.addListener(marker, "click", () => {
-      kakaoInfoWindow.setContent(mapInfoHtml(listing));
-      kakaoInfoWindow.open(kakaoMapObj, marker);
-    });
-    kakaoMarkers.push(marker);
-    bounds.extend(position);
-  });
-  if (pins.length) kakaoMapObj.setBounds(bounds);
-  kakaoMapObj.relayout();
 }
 
 function inPriceRange(listing) {

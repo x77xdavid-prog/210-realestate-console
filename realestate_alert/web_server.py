@@ -351,6 +351,7 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
             super().__init__(*args, directory=str(web_root), **kwargs)
 
         def do_GET(self) -> None:
+            self._own_cache_control = False  # 요청마다 초기화(keep-alive 재사용 대비)
             if not self._authorized():
                 self._send_unauthorized()
                 return
@@ -436,17 +437,18 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
             if self.path.startswith("/api/nearby-supply"):
                 q = parse_qs(urlparse(self.path).query)
                 region = (q.get("region") or [""])[0].strip()
+                sido = (q.get("sido") or [""])[0].strip()
                 if not region:
                     self._send_json({"region": "", "supplies": [], "error": "region 필요"}, status=400)
                     return
                 from realestate_alert.cheongyak import nearby_supply_report
                 result = _ext_fetch(
-                    f"supply:{region}",
-                    lambda: nearby_supply_report(region),
+                    f"supply:{sido}:{region}",
+                    lambda: nearby_supply_report(region, sido=sido),
                     lambda r: bool(r) and r.get("error") is None,
                 )
                 if result is None:
-                    result = {"region": region, "supplies": [],
+                    result = {"region": region, "sido": sido, "supplies": [],
                               "error": "주변 입주예정 조회가 혼잡합니다. 잠시 후 다시 시도하세요."}
                 self._send_json(result)
                 return
@@ -464,8 +466,14 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 self._send_json(_diagnostics_payload(config_path))
                 return
             if self.path == "/api/config":
-                # Kakao 지도 JS 키(도메인 제한 클라이언트 키)를 프런트에 전달. 없으면 빈 문자열.
-                self._send_json({"kakao_js_key": os.environ.get("KAKAO_JS_KEY", "").strip()})
+                from realestate_alert.map_tiles import has_vworld_key
+                # 지도 타일: VWorld 키가 있으면 서버가 중계하는 한국형 지도(map-tile
+                # 프록시)를, 없으면 프런트가 키 없는 OpenStreetMap으로 폴백한다.
+                # 키 값 자체는 노출하지 않고 사용 가능 여부(bool)만 전달한다.
+                self._send_json({"vworld_map": has_vworld_key()})
+                return
+            if self.path.startswith("/api/map-tile/"):
+                self._serve_map_tile()
                 return
             if self.path.startswith("/api/geocode"):
                 query = parse_qs(urlparse(self.path).query)
@@ -847,8 +855,10 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
             self.send_error(404, "Not found")
 
         def end_headers(self) -> None:
-            # 로컬 대시보드는 항상 최신 정적 파일을 쓰도록 캐시를 끈다.
-            self.send_header("Cache-Control", "no-cache")
+            # 대시보드 정적 파일·API는 항상 최신을 쓰도록 캐시를 끈다. 단, 지도 타일처럼
+            # 자체 Cache-Control을 지정한 응답은 건드리지 않는다(브라우저 타일 캐시 유지).
+            if not getattr(self, "_own_cache_control", False):
+                self.send_header("Cache-Control", "no-cache")
             super().end_headers()
 
         def log_message(self, format: str, *args) -> None:
@@ -1031,6 +1041,36 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def _serve_map_tile(self) -> None:
+            """VWorld 배경 타일 중계 — /api/map-tile/{z}/{x}/{y}.png (Leaflet 규약).
+
+            키 없음·좌표 오류·VWorld 실패는 모두 404로 응답해 프런트가 OSM으로
+            폴백하게 한다. 키는 서버에만 두고 노출하지 않는다.
+            """
+            from realestate_alert.map_tiles import MapTileError, get_map_tile
+
+            rest = urlparse(self.path).path[len("/api/map-tile/"):]
+            if rest.endswith(".png"):
+                rest = rest[:-4]
+            parts = rest.split("/")
+            if len(parts) != 3:
+                self.send_response(404); self.end_headers(); return
+            try:
+                z, x, y = (int(p) for p in parts)
+            except ValueError:
+                self.send_response(404); self.end_headers(); return
+            try:
+                data = get_map_tile(z, x, y)
+            except MapTileError:
+                self.send_response(404); self.end_headers(); return
+            self._own_cache_control = True  # end_headers의 전역 no-cache 주입 방지
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=604800")  # 7일
+            self.end_headers()
+            self.wfile.write(data)
 
     return RealEstateAlertHandler
 

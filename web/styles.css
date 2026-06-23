@@ -1105,8 +1105,8 @@ td span {
   font-size: 0.76rem;
 }
 
-/* ===== 지도검색 (Kakao) ===== */
-.kakao-map {
+/* ===== 지도검색 (Leaflet — VWorld / OpenStreetMap) ===== */
+.search-map {
   width: 100%;
   height: 480px;
   border-radius: var(--radius-md);
@@ -1114,12 +1114,12 @@ td span {
   overflow: hidden;
 }
 
-/* Leaflet(OSM) 폴백 — divIcon 기본 흰 박스 제거, 타일 위 컨트롤 톤 정리 */
+/* Leaflet — divIcon 기본 흰 박스 제거, 타일 위 컨트롤 톤 정리 */
 .leaflet-fit-pin {
   background: none;
   border: none;
 }
-.kakao-map .leaflet-container {
+.search-map .leaflet-container {
   height: 100%;
   width: 100%;
   font: inherit;

@@ -186,9 +186,8 @@ python -m realestate_alert serve-web --config config.render.json --host 0.0.0.0 
 |------|------|
 | `DASHBOARD_PASSWORD` | 대시보드 Basic 인증 비밀번호(임차인 실명 보호상 **필수**) |
 | `DATA_GO_KR_API_KEY` | 공공데이터포털(건축물대장·실거래·심평원·청약홈) |
-| `VWORLD_API_KEY` | VWorld 지오코딩·토지정보 |
+| `VWORLD_API_KEY` | VWorld 지오코딩·토지정보·지도 타일(서버가 중계, 없으면 OpenStreetMap) |
 | `VWORLD_DOMAIN` | VWorld 키에 등록한 도메인(`https://210.mapsaihelp.com`). 기본 localhost면 거부됨 |
-| `KAKAO_JS_KEY` | 지도 표시(선택) |
 | `GMAIL_APP_PASSWORD` | gmail notifier 사용 시(선택) |
 
 **백업**

@@ -101,18 +101,61 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(diag["fetched_count"], 2)
         self.assertEqual(diag["source_counts"].get("manual"), 2)
 
-    def test_api_config_exposes_kakao_key(self):
+    def test_api_config_exposes_vworld_map_flag(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             config_path = _write_fixture_config(root)
             server = _start_server(config_path, root)
             try:
-                with mock.patch.dict("os.environ", {"KAKAO_JS_KEY": "abc123"}, clear=False):
-                    cfg = _request_json(server, "GET", "/api/config")
+                with mock.patch.dict("os.environ", {"VWORLD_API_KEY": "abc123"}, clear=False):
+                    on = _request_json(server, "GET", "/api/config")
+                with mock.patch.dict("os.environ", {}, clear=True):
+                    off = _request_json(server, "GET", "/api/config")
             finally:
                 server.shutdown()
                 server.server_close()
-        self.assertEqual(cfg["kakao_js_key"], "abc123")
+        self.assertTrue(on["vworld_map"])
+        self.assertFalse(off["vworld_map"])
+        self.assertNotIn("kakao_js_key", on)  # 카카오 키 노출 제거
+
+    def test_api_map_tile_proxies_png(self):
+        png = b"\x89PNG\r\n\x1a\n" + b"body"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                with mock.patch("realestate_alert.map_tiles.get_map_tile", return_value=png) as gm:
+                    status, headers, body = _request_raw(server, "GET", "/api/map-tile/13/6985/3172.png")
+            finally:
+                server.shutdown()
+                server.server_close()
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("Content-Type"), "image/png")
+        self.assertEqual(body, png)
+        gm.assert_called_once_with(13, 6985, 3172)
+        # 타일은 7일 캐시. 전역 no-cache 오버라이드가 덮어쓰지 않아야 한다(브라우저 타일 캐시).
+        self.assertEqual(headers.get("Cache-Control"), "public, max-age=604800")
+
+    def test_api_map_tile_404_when_unavailable(self):
+        from realestate_alert.map_tiles import MapTileError
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config_path = _write_fixture_config(root)
+            server = _start_server(config_path, root)
+            try:
+                with mock.patch(
+                    "realestate_alert.map_tiles.get_map_tile",
+                    side_effect=MapTileError("no key"),
+                ):
+                    status, _h, _body = _request_raw(server, "GET", "/api/map-tile/13/6985/3172.png")
+                # 좌표가 정수가 아니면 네트워크 시도 없이 404
+                bad_status, _h2, _b = _request_raw(server, "GET", "/api/map-tile/13/x/y.png")
+            finally:
+                server.shutdown()
+                server.server_close()
+        self.assertEqual(status, 404)  # 프런트가 OSM으로 폴백
+        self.assertEqual(bad_status, 404)
 
     def test_api_diagnostics_flags_missing_key(self):
         with tempfile.TemporaryDirectory() as temp_dir:

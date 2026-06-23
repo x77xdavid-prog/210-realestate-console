@@ -45,11 +45,9 @@ services:
       - key: DATA_GO_KR_API_KEY
         sync: false
       - key: VWORLD_API_KEY
-        sync: false
-      - key: KAKAO_JS_KEY
-        sync: false
+        sync: false                   # 토지정보 + 지도 타일(서버 중계) 공용 키
       - key: VWORLD_DOMAIN
-        value: https://210.mapsaihelp.com   # land_info 가 읽음(기본 localhost면 VWorld 거부)
+        value: https://210.mapsaihelp.com   # land_info·지도 타일의 Referer(기본 localhost면 VWorld 거부)
       # config.render.json 의 notifiers 에 gmail 을 켰다면 아래도 추가:
       # - key: GMAIL_APP_PASSWORD
       #   sync: false
