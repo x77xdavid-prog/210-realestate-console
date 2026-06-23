@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>210정형외과 · 부동산 매물 콘솔</title>
-    <link rel="stylesheet" href="styles.css?v=20260623a" />
+    <link rel="stylesheet" href="styles.css?v=20260623b" />
   </head>
   <body>
     <div class="app-shell">
@@ -366,10 +366,16 @@
             <div class="map-frame-wrap">
               <iframe
                 id="naverMapFrame"
-                title="네이버 지도 주소 검색"
+                title="지도 미리보기"
                 loading="lazy"
                 allow="geolocation; accelerometer; gyroscope"
               ></iframe>
+              <div class="map-frame-empty" id="mapFrameEmpty" hidden>
+                <span class="map-frame-empty-mark" aria-hidden="true">🗺️</span>
+                <strong>지도 미리보기를 표시하지 못했습니다</strong>
+                <p>주소를 좌표로 변환하지 못했습니다 (지번이 정확하지 않거나 변환 한도일 수 있어요). 아래 버튼으로 네이버 지도에서 바로 확인하세요.</p>
+                <a class="button primary compact" id="mapEmptyNaverLink" href="https://map.naver.com" target="_blank" rel="noreferrer">네이버 지도에서 열기</a>
+              </div>
               <div class="map-fallback">
                 <span>지도가 표시되지 않으면</span>
                 <button type="button" class="button secondary compact" id="reloadMapButton">다시 불러오기</button>
@@ -568,6 +574,6 @@
         <div class="checklist-sections" id="checklistSections"></div>
       </div>
     </dialog>
-    <script type="module" src="app.js?v=20260616j"></script>
+    <script type="module" src="app.js?v=20260623a"></script>
   </body>
 </html>

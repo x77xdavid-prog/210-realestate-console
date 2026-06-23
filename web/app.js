@@ -3250,9 +3250,22 @@ async function renderMap(listing) {
       ? safeHref(listing.naver_land_url)
       : naverLandUrl({ location: address });
   }
-  // 좌표를 알면 핀이 표시되는 임베드 지도, 아니면 네이버 지도 검색 화면
+  // 좌표를 알면 핀이 표시되는 OSM 임베드(모바일에서도 안정적). 좌표를 못 구하면
+  // 네이버를 iframe에 넣지 않는다 — 네이버는 iOS Safari 등에서 임베드가 차단돼
+  // 빈 박스만 남기 때문. 대신 안내 카드 + '새 탭에서 열기'로 대체한다.
   const coords = await resolveCoords(listing);
-  elements.naverMapFrame.src = coords ? osmEmbedUrl(coords[0], coords[1]) : naverMapUrl;
+  const frameEmpty = document.querySelector("#mapFrameEmpty");
+  const emptyNaverLink = document.querySelector("#mapEmptyNaverLink");
+  if (coords) {
+    elements.naverMapFrame.src = osmEmbedUrl(coords[0], coords[1]);
+    elements.naverMapFrame.hidden = false;
+    if (frameEmpty) frameEmpty.hidden = true;
+  } else {
+    elements.naverMapFrame.src = "about:blank";
+    elements.naverMapFrame.hidden = true;
+    if (emptyNaverLink) emptyNaverLink.href = naverMapUrl;
+    if (frameEmpty) frameEmpty.hidden = false;
+  }
 }
 
 function renderMapInfo(listing) {

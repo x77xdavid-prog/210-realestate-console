@@ -2106,6 +2106,48 @@ td span {
   background: #eef4f7;
 }
 
+#naverMapFrame[hidden] {
+  display: none;
+}
+
+/* 좌표를 못 구했을 때 빈 회색 박스 대신 보여주는 안내 카드 */
+.map-frame-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  min-height: 460px;
+  padding: 28px 24px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, #f3f8fb 0%, #ffffff 100%);
+}
+
+.map-frame-empty[hidden] {
+  display: none;
+}
+
+.map-frame-empty-mark {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.map-frame-empty strong {
+  font-size: 0.98rem;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.map-frame-empty p {
+  margin: 0;
+  max-width: 30ch;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
 .map-fallback {
   display: flex;
   align-items: center;
@@ -3286,6 +3328,21 @@ details.fit-group[open] > summary::before {
 
   .board-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 모바일에서 지도 높이를 줄여 화면을 덜 잡아먹게 한다 */
+  .search-map {
+    height: 340px;
+  }
+
+  #naverMapFrame,
+  .map-frame-empty {
+    min-height: 320px;
+  }
+
+  /* 모바일에선 정보 패널이 지도 아래로 쌓이므로 내부 스크롤 대신 자연스럽게 늘린다 */
+  .map-info {
+    max-height: none;
   }
 }
 
