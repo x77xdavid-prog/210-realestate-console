@@ -908,6 +908,15 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
         def log_message(self, format: str, *args) -> None:
             return
 
+        def handle_one_request(self) -> None:
+            # 브라우저가 응답을 끝까지 받기 전에 연결을 끊으면(지도 타일 팬/줌 취소
+            # 등) Windows에서 WinError 10053이 난다 — 정상 동작이므로 스택트레이스
+            # 없이 흡수한다. 모든 응답 경로(타일·사진·JSON)에 공통 적용된다.
+            try:
+                super().handle_one_request()
+            except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+                self.close_connection = True
+
         def _serve_static(self) -> None:
             """정적 파일을 gzip(클라이언트 지원 시)과 캐시 헤더와 함께 서빙한다.
 
