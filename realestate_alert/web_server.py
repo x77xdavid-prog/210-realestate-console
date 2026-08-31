@@ -499,7 +499,10 @@ def create_handler(config_path: Path, web_root: Path) -> type[SimpleHTTPRequestH
                 # 지도 타일: VWorld 키가 있으면 서버가 중계하는 한국형 지도(map-tile
                 # 프록시)를, 없으면 프런트가 키 없는 OpenStreetMap으로 폴백한다.
                 # 키 값 자체는 노출하지 않고 사용 가능 여부(bool)만 전달한다.
-                self._send_json({"vworld_map": has_vworld_key()})
+                self._send_json({
+                    "vworld_map": has_vworld_key(),
+                    "locations": list(load_config(config_path).criteria.locations),
+                })
                 return
             if self.path.startswith("/api/map-tile/"):
                 self._serve_map_tile()

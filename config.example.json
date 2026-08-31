@@ -2,12 +2,12 @@
   "database_path": "data/seen.sqlite3",
   "interval_seconds": 600,
   "criteria": {
-    "locations": ["양천구", "강서구", "구로구", "영등포구"],
+    "locations": ["양천구", "강서구", "구로구", "영등포구", "강남구", "서초구"],
     "max_deposit": 150000000,
     "max_monthly_rent": 6000000,
     "min_area_m2": 70,
     "max_premium": 50000000,
-    "required_keywords": ["건물", "토지", "상가", "병원", "의원"]
+    "required_keywords": ["건물", "토지", "상가", "병원", "의원", "아파트", "근린시설", "오피스텔"]
   },
   "sources": [
     {
@@ -35,9 +35,24 @@
       "sigungu": "영등포구"
     },
     {
+      "type": "onbid",
+      "sido": "서울특별시",
+      "sigungu": "강남구"
+    },
+    {
+      "type": "onbid",
+      "sido": "서울특별시",
+      "sigungu": "서초구"
+    },
+    {
       "type": "court",
       "court": "서울남부지방법원",
       "districts": ["양천구", "강서구", "구로구", "영등포구"]
+    },
+    {
+      "type": "court",
+      "court": "서울중앙지방법원",
+      "districts": ["강남구", "서초구"]
     },
     {
       "type": "lh",

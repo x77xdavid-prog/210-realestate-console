@@ -185,6 +185,7 @@ const state = {
   areaMax: null,
   dateFilter: null,
   vworldMap: false,
+  targetLocations: [],
   hasServer: false,
   selectedListing: null,
   checklist: {
@@ -414,8 +415,8 @@ function showToast(message) {
 
 // 정적 모드(서버 없음) 샘플 필터용 기본값 — 서버 모드에서는 config의 criteria가 적용된다
 const DEFAULT_SEARCH_CRITERIA = {
-  locations: ["양천구"],
-  keywords: ["건물", "토지", "상가", "병원", "의원"],
+  locations: ["양천구", "강서구", "구로구", "영등포구", "강남구", "서초구"],
+  keywords: ["건물", "토지", "상가", "병원", "의원", "아파트", "근린시설", "오피스텔"],
   maxDeposit: 150000000,
   maxRent: 6000000,
   minArea: 70,
@@ -440,8 +441,9 @@ function matchesCriteria(listing, criteria) {
   );
 }
 
-function isYangcheonAddress(address) {
-  return address.includes("서울") && address.includes("양천구");
+function targetDistrictOf(address) {
+  const districts = state.targetLocations.length ? state.targetLocations : DEFAULT_SEARCH_CRITERIA.locations;
+  return districts.find((district) => address.includes(district)) || null;
 }
 
 /* ===== Asset fit ===== */
@@ -1233,7 +1235,7 @@ function listingCardHtml(listing) {
 
 /* ===== 수집 전체 — 소스별 컴팩트 표 (수백 건을 한눈에) ===== */
 
-const REGION_ORDER = ["양천구", "강서구", "구로구", "영등포구"];
+const REGION_ORDER = ["양천구", "강서구", "구로구", "영등포구", "강남구", "서초구"];
 const SOURCE_ORDER = ["onbid", "court", "lh", "manual", "naver", "json_file"];
 
 function regionOf(location) {
@@ -1725,8 +1727,10 @@ async function loadAppConfig() {
   try {
     const cfg = await apiJson("/api/config");
     state.vworldMap = !!cfg.vworld_map;
+    state.targetLocations = Array.isArray(cfg.locations) ? cfg.locations : [];
   } catch {
     state.vworldMap = false;
+    state.targetLocations = [];
   }
 }
 
@@ -3269,12 +3273,12 @@ async function renderMap(listing) {
 }
 
 function renderMapInfo(listing) {
-  const addressOk = isYangcheonAddress(listing.location);
+  const targetDistrict = targetDistrictOf(listing.location);
   const fit = evaluateAssetFit(listing);
   elements.mapInfoTitle.textContent = listing.title || "주소 직접 검색";
   elements.mapInfoDetails.innerHTML = [
     ["주소", escapeHtml(listing.location)],
-    ["검토 구역", addressOk ? "서울 양천구 대상" : "대상 외 지역"],
+    ["검토 구역", targetDistrict ? `서울 ${targetDistrict} 대상` : "대상 외 지역"],
     ["매물 형태", listing.floor === "토지/건물" ? "토지 또는 건물 매입 후보" : "상가/건물 사용 후보"],
     ["조건 판정", `${fit.label} (${fit.checks.map((item) => `${item.label}:${item.ok ? "OK" : "확인"}`).join(", ")})`],
     ["대지", formatArea(listing.land_area_m2)],
@@ -3299,8 +3303,8 @@ function renderMapInfo(listing) {
     .map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`)
     .join("");
   const pill = document.querySelector("#mapInfoPanel .status-pill");
-  pill.textContent = addressOk ? "양천구 검토 대상" : "양천구 외 지역";
-  pill.className = `status-pill ${addressOk ? "ok" : "risk"}`;
+  pill.textContent = targetDistrict ? `${targetDistrict} 검토 대상` : "검토 대상 외 지역";
+  pill.className = `status-pill ${targetDistrict ? "ok" : "risk"}`;
 }
 
 /* ===== Finance ===== */
